@@ -281,9 +281,9 @@ class _AIChatPageState extends State<AIChatPage> {
     final history = <List<String>>[];
     for (final msg in _messages) {
       if (!msg.isUser) {
-        history.add([AIService.roleAssistant.toString(), msg.content]);
+        history.add(['1', msg.content]);  // 1 表示 AI 助手
       } else {
-        history.add([AIService.roleUser.toString(), msg.content]);
+        history.add(['0', msg.content]);  // 0 表示用户
       }
     }
 
