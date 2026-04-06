@@ -1,13 +1,59 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+/// AI 服务配置
+class AIConfig {
+  /// API 基础地址
+  static const String baseUrl =
+      'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+
+  /// 模型名称
+  static const String model = 'qwen-turbo';
+
+  /// 请求超时时间（秒）
+  static const int timeoutSeconds = 30;
+
+  /// 最大重试次数
+  static const int maxRetries = 3;
+
+  /// API Key（请通过环境变量或配置文件设置）
+  /// 在生产环境中，不应硬编码 API Key
+  static String? apiKey;
+}
+
+/// 消息角色
+class MessageRole {
+  static const String system = 'system';
+  static const String user = 'user';
+  static const String assistant = 'assistant';
+}
+
+/// 聊天消息结构
+class ChatMessage {
+  final String role;
+  final String content;
+
+  ChatMessage({required this.role, required this.content});
+
+  Map<String, String> toMap() => {'role': role, 'content': content};
+
+  factory ChatMessage.fromMap(Map<String, dynamic> map) {
+    return ChatMessage(
+      role: map['role'] as String,
+      content: map['content'] as String,
+    );
+  }
+}
+
+/// AI 服务类
 class AIService {
-  static const String _apiKey = 'sk-a29fe46ce1af4a6e9d921fe5636cad7a';
-  static const String _baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-  static const String _model = 'qwen-turbo';
+  // 禁止实例化
+  AIService._();
 
   /// 心理咨询师角色提示词
-  static const String _counselorSystemPrompt = '''
+  static const String counselorSystemPrompt = '''
 你是一位经验丰富、充满共情心的心理咨询师。你的名字叫"小暖"。你的任务是通过对话，引导用户探索内心，找到情绪困扰的根源，并给予他们力量和解决方案。
 
 请严格遵循以下咨询流程：
@@ -32,97 +78,292 @@ class AIService {
 ''';
 
   /// 心情日记安慰提示词
-  static const String _comfortSystemPrompt = '''
-你是一个温暖、治愈、共情能力极强的心理疗愈师，名字叫"小暖"。用户刚刚写了一条心情日记。请你阅读用户的内容，根据用户的心情给予适当的回应。如果是正面情绪，给予鼓励和分享喜悦；如果是负面情绪，给予安慰和支持。要求：1. 语气要温柔、像老朋友一样，不要说教，不要讲大道理。2. 站在用户的角度表示理解（共情）。3. 回复要简短，控制在 200 字以内。
+  static const String comfortSystemPrompt = '''
+你是一个温暖、治愈、共情能力极强的心理疗愈师，名字叫"小暖"。用户刚刚写了一条心情日记。请你阅读用户的内容，根据用户的心情给予适当的回应。如果是正面情绪，给予鼓励和分享喜悦；如果是负面情绪，给予安慰和支持。要求：
+1. 语气要温柔、像老朋友一样，不要说教，不要讲大道理。
+2. 站在用户的角度表示理解（共情）。
+3. 回复要简短，控制在 200 字以内。
 ''';
 
+  /// 获取 API Key
+  /// 优先级：1. 传入的 key  2. AIConfig.apiKey  3. 硬编码的 key（仅用于开发）
+  static String _getApiKey(String? providedKey) {
+    if (providedKey != null && providedKey.isNotEmpty) {
+      return providedKey;
+    }
+    if (AIConfig.apiKey != null && AIConfig.apiKey!.isNotEmpty) {
+      return AIConfig.apiKey!;
+    }
+    // 开发环境使用的默认 key，生产环境应避免
+    if (kDebugMode) {
+      return 'sk-a29fe46ce1af4a6e9d921fe5636cad7a';
+    }
+    throw Exception('API Key 未配置，请设置 AIConfig.apiKey');
+  }
+
+  /// 构建请求头
+  static Map<String, String> _buildHeaders(String apiKey) {
+    return {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  /// 构建请求体
+  static Map<String, dynamic> _buildRequestBody({
+    required String model,
+    required List<Map<String, String>> messages,
+    int? maxTokens,
+    double? temperature,
+  }) {
+    final body = {
+      'model': model,
+      'messages': messages,
+    };
+    if (maxTokens != null) {
+      body['max_tokens'] = maxTokens;
+    }
+    if (temperature != null) {
+      body['temperature'] = temperature;
+    }
+    return body;
+  }
+
+  /// 解析响应
+  static String _parseResponse(http.Response response) {
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final choices = data['choices'] as List?;
+      if (choices != null && choices.isNotEmpty) {
+        final message = choices[0]['message'] as Map<String, dynamic>?;
+        if (message != null && message['content'] != null) {
+          return (message['content'] as String).trim();
+        }
+      }
+      throw Exception('响应格式错误：无法解析消息内容');
+    } else if (response.statusCode == 401) {
+      throw Exception('API Key 无效或已过期');
+    } else if (response.statusCode == 429) {
+      throw Exception('请求过于频繁，请稍后再试');
+    } else if (response.statusCode >= 500) {
+      throw Exception('服务器错误，请稍后再试');
+    } else {
+      throw Exception('API 请求失败: ${response.statusCode}');
+    }
+  }
+
+  /// 带重试的 POST 请求
+  static Future<String> _postWithRetry(
+    String url,
+    Map<String, String> headers,
+    Map<String, dynamic> body,
+  ) async {
+    int retries = 0;
+    Duration retryDelay = const Duration(seconds: 1);
+
+    while (retries <= AIConfig.maxRetries) {
+      try {
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: headers,
+              body: jsonEncode(body),
+            )
+            .timeout(Duration(seconds: AIConfig.timeoutSeconds));
+
+        return _parseResponse(response);
+      } on TimeoutException {
+        if (retries < AIConfig.maxRetries) {
+          retries++;
+          if (kDebugMode) {
+            debugPrint('AI 请求超时，${retryDelay.inSeconds}秒后重试 ($retries/${AIConfig.maxRetries})');
+          }
+          await Future.delayed(retryDelay);
+          retryDelay *= 2; // 指数退避
+        } else {
+          throw Exception('请求超时，请检查网络连接');
+        }
+      } catch (e) {
+        if (retries < AIConfig.maxRetries && e.toString().contains('服务器错误')) {
+          retries++;
+          if (kDebugMode) {
+            debugPrint('AI 请求失败，${retryDelay.inSeconds}秒后重试 ($retries/${AIConfig.maxRetries})');
+          }
+          await Future.delayed(retryDelay);
+          retryDelay *= 2;
+        } else {
+          rethrow;
+        }
+      }
+    }
+    throw Exception('请求失败，已达到最大重试次数');
+  }
+
   /// 心情日记安慰
-  static Future<String> getComfort(String mood, String content, {bool offlineMode = false}) async {
+  /// [mood] 心情类型
+  /// [content] 日记内容
+  /// [offlineMode] 是否离线模式
+  /// [apiKey] 可选的 API Key（优先使用）
+  static Future<String> getComfort(
+    String mood,
+    String content, {
+    bool offlineMode = false,
+    String? apiKey,
+  }) async {
     if (offlineMode) {
       return '';
     }
+
     try {
-      final response = await http.post(
-        Uri.parse(_baseUrl),
-        headers: {
-          'Authorization': 'Bearer $_apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': _model,
-          'messages': [
-            {'role': 'system', 'content': _comfortSystemPrompt},
-            {'role': 'user', 'content': '用户的心情：$mood\n日记内容：$content'},
-          ],
-          'max_tokens': 400,
-          'temperature': 0.7,
-        }),
+      final key = _getApiKey(apiKey);
+      final messages = [
+        ChatMessage(role: MessageRole.system, content: comfortSystemPrompt)
+            .toMap(),
+        ChatMessage(
+          role: MessageRole.user,
+          content: '用户的心情：$mood\n日记内容：$content',
+        ).toMap(),
+      ];
+
+      final body = _buildRequestBody(
+        model: AIConfig.model,
+        messages: messages,
+        maxTokens: 400,
+        temperature: 0.7,
       );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final aiResponse = data['choices'][0]['message']['content'] as String;
-        return aiResponse.trim();
-      } else {
-        throw Exception('API 请求失败: ${response.statusCode}');
-      }
+      final response = await _postWithRetry(
+        AIConfig.baseUrl,
+        _buildHeaders(key),
+        body,
+      );
+
+      return response;
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AI getComfort 错误: $e');
+      }
       return '虽然不知道发生了什么，但我陪着你。';
     }
   }
 
-  /// 聊天消息结构
-  static const int roleUser = 0;
-  static const int roleAssistant = 1;
-
   /// 多轮对话聊天
-  /// [messages] 之前的对话历史，每项为 [role, content]，role: 0=用户, 1=AI
+  /// [messages] 对话历史列表，每项为 ChatMessage 或 [role, content] 格式
   /// [newMessage] 用户新发送的消息
-  static Future<String> chat(List<List<String>> messages, String newMessage, {bool offlineMode = false}) async {
+  /// [offlineMode] 是否离线模式
+  /// [apiKey] 可选的 API Key（优先使用）
+  static Future<String> chat(
+    List<dynamic> messages,
+    String newMessage, {
+    bool offlineMode = false,
+    String? apiKey,
+  }) async {
     if (offlineMode) {
       return '当前处于离线模式，无法与小暖对话。请检查网络设置。';
     }
 
     try {
-      // 构建消息列表
+      final key = _getApiKey(apiKey);
       final List<Map<String, String>> apiMessages = [
-        {'role': 'system', 'content': _counselorSystemPrompt},
+        ChatMessage(role: MessageRole.system, content: counselorSystemPrompt)
+            .toMap(),
       ];
 
-      // 添加历史消息
+      // 处理历史消息
       for (final msg in messages) {
-        if (msg.length >= 2) {
-          final role = int.tryParse(msg[0]) == roleUser ? 'user' : 'assistant';
-          apiMessages.add({'role': role, 'content': msg[1]});
+        if (msg is ChatMessage) {
+          apiMessages.add(msg.toMap());
+        } else if (msg is List && msg.length >= 2) {
+          final roleStr = msg[0].toString();
+          final content = msg[1].toString();
+          final role = roleStr == '0' ? MessageRole.user : MessageRole.assistant;
+          apiMessages.add(ChatMessage(role: role, content: content).toMap());
         }
       }
 
       // 添加新消息
-      apiMessages.add({'role': 'user', 'content': newMessage});
-
-      final response = await http.post(
-        Uri.parse(_baseUrl),
-        headers: {
-          'Authorization': 'Bearer $_apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': _model,
-          'messages': apiMessages,
-          'max_tokens': 800,
-          'temperature': 0.8,
-        }),
+      apiMessages.add(
+        ChatMessage(role: MessageRole.user, content: newMessage).toMap(),
       );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final aiResponse = data['choices'][0]['message']['content'] as String;
-        return aiResponse.trim();
-      } else {
-        throw Exception('API 请求失败: ${response.statusCode}');
-      }
+      final body = _buildRequestBody(
+        model: AIConfig.model,
+        messages: apiMessages,
+        maxTokens: 800,
+        temperature: 0.8,
+      );
+
+      final response = await _postWithRetry(
+        AIConfig.baseUrl,
+        _buildHeaders(key),
+        body,
+      );
+
+      return response;
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AI chat 错误: $e');
+      }
       return '抱歉，我现在有点累了，没能听清你说什么。能不能再说一遍呢？';
+    }
+  }
+
+  /// 生成邮件内容（供消息调度器使用）
+  /// [logs] 心情记录列表
+  /// [range] 读取记录的时间范围
+  static Future<String> generateMailContent(
+    List<String> recentNotes, {
+    bool offlineMode = false,
+    String? apiKey,
+  }) async {
+    if (offlineMode) {
+      return '';
+    }
+
+    if (recentNotes.isEmpty) {
+      return '';
+    }
+
+    try {
+      final key = _getApiKey(apiKey);
+      final notesText = recentNotes.map((n) => '- $n').join('\n');
+
+      final mailPrompt = '''
+你是小暖，一位温暖的心理陪伴者。用户最近记录了以下心情日记：
+
+$notesText
+
+请根据这些记录，生成一封温暖的邮件给用户，内容包括：
+1. 对用户近期心情的理解和共情
+2. 一句温暖的名言或鼓励
+3. 简单的建议或陪伴话语
+
+要求：邮件内容要真挚、温暖，200字以内，不要太长。
+''';
+
+      final messages = [
+        ChatMessage(role: MessageRole.system, content: mailPrompt).toMap(),
+      ];
+
+      final body = _buildRequestBody(
+        model: AIConfig.model,
+        messages: messages,
+        maxTokens: 500,
+        temperature: 0.7,
+      );
+
+      final response = await _postWithRetry(
+        AIConfig.baseUrl,
+        _buildHeaders(key),
+        body,
+      );
+
+      return response;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AI generateMailContent 错误: $e');
+      }
+      return '';
     }
   }
 }

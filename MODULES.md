@@ -469,15 +469,26 @@ lib/
 
 ## API 集成
 
+### 配置信息
+
 - **服务商**：阿里云通义千问
 - **模型**：qwen-turbo
 - **端点**：`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
-- **认证**：Bearer Token
+- **认证方式**：Bearer Token
+
+### API Key 配置
+
+API Key 存储在项目根目录 `ali_apikey.env` 文件中：
+```
+DASHSCOPE_API_KEY=sk-a29fe46ce1af4a6e9d921fe5636cad7a
+```
 
 **使用场景**：
 1. AI 对话（多轮聊天）
 2. 心情记录安慰（单次生成）
 3. 邮件内容生成（定时任务）
+
+> ⚠️ **注意**：请勿将 API Key 上传到公开仓库，建议将 `ali_apikey.env` 加入 `.gitignore`。
 
 ---
 
