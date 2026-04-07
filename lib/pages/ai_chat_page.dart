@@ -3,6 +3,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/ai_service.dart';
+import '../services/ai_chat_manager.dart';
 import '../providers/theme_provider.dart';
 
 const String _chatBoxName = 'ai_chat_history';
@@ -48,7 +49,13 @@ class ConversationInfo {
   }
 
   List<dynamic> toList() {
-    return [id, preview, createdAt.toIso8601String(), updatedAt.toIso8601String(), messageCount];
+    return [
+      id,
+      preview,
+      createdAt.toIso8601String(),
+      updatedAt.toIso8601String(),
+      messageCount,
+    ];
   }
 }
 
@@ -65,6 +72,8 @@ class _AIChatPageState extends State<AIChatPage> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
 
+  final AIChatManager _chatManager = AIChatManager();
+
   List<ChatMessage> _messages = [];
   bool _isLoading = false;
 
@@ -79,6 +88,34 @@ class _AIChatPageState extends State<AIChatPage> {
   void initState() {
     super.initState();
     _initChatBox();
+
+    // 监听输入框内容变化，更新发送按钮状态
+    _controller.addListener(() {
+      setState(() {
+        // 更新按钮状态（将用于透明度和onPressed）
+      });
+    });
+
+    // 监听AIChatManager的状态变化
+    _chatManager.addLoadingListener((isLoading) {
+      if (mounted) {
+        setState(() {
+          _isLoading = isLoading;
+        });
+      }
+    });
+
+    _chatManager.addResponseListener((response) {
+      if (mounted) {
+        _handleAIResponse(response);
+      }
+    });
+
+    _chatManager.addErrorListener((error) {
+      if (mounted) {
+        _handleAIError(error);
+      }
+    });
   }
 
   Future<void> _initChatBox() async {
@@ -88,35 +125,49 @@ class _AIChatPageState extends State<AIChatPage> {
 
   void _loadMessages() {
     // 加载对话记录列表
-    final convStored = _chatBox.get(_conversationsKey, defaultValue: <dynamic>[]);
+    final convStored = _chatBox.get(
+      _conversationsKey,
+      defaultValue: <dynamic>[],
+    );
     _conversations = (convStored as List<dynamic>)
         .map((e) => ConversationInfo.fromList(e as List))
         .toList();
 
     // 加载当前对话
-    final stored = _chatBox.get(_currentConversationKey, defaultValue: <dynamic>[]);
+    final stored = _chatBox.get(
+      _currentConversationKey,
+      defaultValue: <dynamic>[],
+    );
     _messages = (stored as List<dynamic>)
         .map((e) => ChatMessage.fromList(e as List))
         .toList();
 
     // 如果没有历史消息，添加欢迎语
     if (_messages.isEmpty) {
-      _messages.add(ChatMessage(
-        isUser: false,
-        content: _welcomeMessage,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(
+        ChatMessage(
+          isUser: false,
+          content: _welcomeMessage,
+          timestamp: DateTime.now(),
+        ),
+      );
       _saveCurrentConversation();
     }
     setState(() {});
   }
 
   Future<void> _saveCurrentConversation() async {
-    await _chatBox.put(_currentConversationKey, _messages.map((e) => e.toList()).toList());
+    await _chatBox.put(
+      _currentConversationKey,
+      _messages.map((e) => e.toList()).toList(),
+    );
   }
 
   Future<void> _saveConversationList() async {
-    await _chatBox.put(_conversationsKey, _conversations.map((e) => e.toList()).toList());
+    await _chatBox.put(
+      _conversationsKey,
+      _conversations.map((e) => e.toList()).toList(),
+    );
   }
 
   /// 进入选择模式
@@ -189,7 +240,8 @@ class _AIChatPageState extends State<AIChatPage> {
 
     if (confirm == true) {
       // 按索引从大到小排序，确保删除时不影响其他索引
-      final sortedIndexes = _selectedIndexes.toList()..sort((a, b) => b.compareTo(a));
+      final sortedIndexes = _selectedIndexes.toList()
+        ..sort((a, b) => b.compareTo(a));
 
       setState(() {
         for (final index in sortedIndexes) {
@@ -203,19 +255,21 @@ class _AIChatPageState extends State<AIChatPage> {
 
       // 如果删除后为空，重新添加欢迎语
       if (_messages.isEmpty) {
-        _messages.add(ChatMessage(
-          isUser: false,
-          content: _welcomeMessage,
-          timestamp: DateTime.now(),
-        ));
+        _messages.add(
+          ChatMessage(
+            isUser: false,
+            content: _welcomeMessage,
+            timestamp: DateTime.now(),
+          ),
+        );
       }
 
       await _saveCurrentConversation();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已删除 $count 条消息')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已删除 $count 条消息')));
       }
     }
   }
@@ -266,11 +320,9 @@ class _AIChatPageState extends State<AIChatPage> {
 
     // 添加用户消息
     setState(() {
-      _messages.add(ChatMessage(
-        isUser: true,
-        content: text,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(
+        ChatMessage(isUser: true, content: text, timestamp: DateTime.now()),
+      );
       _isLoading = true;
     });
 
@@ -281,30 +333,26 @@ class _AIChatPageState extends State<AIChatPage> {
     final history = <List<String>>[];
     for (final msg in _messages) {
       if (!msg.isUser) {
-        history.add(['1', msg.content]);  // 1 表示 AI 助手
+        history.add(['1', msg.content]); // 1 表示 AI 助手
       } else {
-        history.add(['0', msg.content]);  // 0 表示用户
+        history.add(['0', msg.content]); // 0 表示用户
       }
     }
 
-    // 调用 AI
+    // 使用AIChatManager发送消息 - 即使页面切换，请求也不会被取消
+    // 响应和错误将由监听器处理，这样即使页面切换再返回，也能收到结果
     try {
-      final response = await AIService.chat(history, text);
-      setState(() {
-        _messages.add(ChatMessage(
-          isUser: false,
-          content: response,
-          timestamp: DateTime.now(),
-        ));
-        _isLoading = false;
-      });
-      await _saveCurrentConversation();
-      _scrollToBottom();
+      await _chatManager.sendMessage(
+        history,
+        text,
+        offlineMode: themeProvider.offlineMode,
+      );
+      // 注意：加载状态、响应和错误现在由监听器处理
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      _showSnackBar('发送失败，请稍后重试');
+      // 这里捕获的异常通常是立即发生的错误（如参数错误）
+      if (mounted) {
+        _showSnackBar('发送失败，请稍后重试');
+      }
     }
   }
 
@@ -322,9 +370,45 @@ class _AIChatPageState extends State<AIChatPage> {
 
   void _showSnackBar(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _handleAIResponse(String response) {
+    // 检查是否已经添加了这条AI响应（避免重复添加）
+    final isAlreadyAdded = _messages.any(
+      (msg) =>
+          !msg.isUser &&
+          msg.content == response &&
+          msg.timestamp.isAfter(
+            DateTime.now().subtract(const Duration(seconds: 5)),
+          ),
     );
+
+    if (!isAlreadyAdded) {
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            isUser: false,
+            content: response,
+            timestamp: DateTime.now(),
+          ),
+        );
+      });
+      _saveCurrentConversation();
+      _scrollToBottom();
+    }
+  }
+
+  void _handleAIError(Exception error) {
+    // 如果用户取消了请求，不显示错误消息
+    if (error.toString().contains('请求被取消') ||
+        error.toString().contains('用户取消了请求')) {
+      return;
+    }
+
+    _showSnackBar('发送失败，请稍后重试');
   }
 
   /// 开启新对话（保存当前对话到历史）
@@ -333,7 +417,9 @@ class _AIChatPageState extends State<AIChatPage> {
     String preview = '新对话';
     for (final msg in _messages) {
       if (msg.isUser) {
-        preview = msg.content.length > 20 ? '${msg.content.substring(0, 20)}...' : msg.content;
+        preview = msg.content.length > 20
+            ? '${msg.content.substring(0, 20)}...'
+            : msg.content;
         break;
       }
     }
@@ -342,7 +428,9 @@ class _AIChatPageState extends State<AIChatPage> {
     final conversation = ConversationInfo(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       preview: preview,
-      createdAt: _messages.isNotEmpty ? _messages.first.timestamp : DateTime.now(),
+      createdAt: _messages.isNotEmpty
+          ? _messages.first.timestamp
+          : DateTime.now(),
       updatedAt: DateTime.now(),
       messageCount: _messages.length,
     );
@@ -350,7 +438,10 @@ class _AIChatPageState extends State<AIChatPage> {
     await _saveConversationList();
 
     // 保存当前对话内容
-    await _chatBox.put('conversation_${conversation.id}', _messages.map((e) => e.toList()).toList());
+    await _chatBox.put(
+      'conversation_${conversation.id}',
+      _messages.map((e) => e.toList()).toList(),
+    );
 
     // 清空并开启新对话
     setState(() {
@@ -365,9 +456,9 @@ class _AIChatPageState extends State<AIChatPage> {
     await _saveCurrentConversation();
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('对话已保存，开启新对话')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('对话已保存，开启新对话')));
     }
   }
 
@@ -423,7 +514,11 @@ class _AIChatPageState extends State<AIChatPage> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey[300]),
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 64,
+                            color: Colors.grey[300],
+                          ),
                           const SizedBox(height: 16),
                           Text(
                             '暂无对话记录',
@@ -439,7 +534,9 @@ class _AIChatPageState extends State<AIChatPage> {
                         final conv = _conversations[index];
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primaryContainer,
                             child: Text('${index + 1}'),
                           ),
                           title: Text(
@@ -449,10 +546,16 @@ class _AIChatPageState extends State<AIChatPage> {
                           ),
                           subtitle: Text(
                             '${_formatDate(conv.createdAt)} · ${conv.messageCount} 条消息',
-                            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 12,
+                            ),
                           ),
                           trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                            ),
                             onPressed: () => _deleteConversation(ctx, index),
                           ),
                           onTap: () => _loadConversation(ctx, index),
@@ -469,7 +572,10 @@ class _AIChatPageState extends State<AIChatPage> {
   /// 加载历史对话
   Future<void> _loadConversation(BuildContext context, int index) async {
     final conv = _conversations[index];
-    final stored = _chatBox.get('conversation_${conv.id}', defaultValue: <dynamic>[]);
+    final stored = _chatBox.get(
+      'conversation_${conv.id}',
+      defaultValue: <dynamic>[],
+    );
     final messages = (stored as List<dynamic>)
         .map((e) => ChatMessage.fromList(e as List))
         .toList();
@@ -483,9 +589,7 @@ class _AIChatPageState extends State<AIChatPage> {
 
     if (!context.mounted) return;
     Navigator.pop(context);
-    messenger.showSnackBar(
-      const SnackBar(content: Text('已加载对话')),
-    );
+    messenger.showSnackBar(const SnackBar(content: Text('已加载对话')));
   }
 
   /// 删除历史对话
@@ -517,15 +621,15 @@ class _AIChatPageState extends State<AIChatPage> {
       await _saveConversationList();
       setState(() {});
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(content: Text('对话已删除')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('对话已删除')));
     }
   }
 
   String _formatDate(DateTime date) {
     final now = DateTime.now();
-    if (date.year == now.year && date.month == now.month && date.day == now.day) {
+    if (date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day) {
       return '今天 ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
     }
     return '${date.month}/${date.day} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
@@ -533,6 +637,14 @@ class _AIChatPageState extends State<AIChatPage> {
 
   @override
   void dispose() {
+    // 移除监听器
+    _chatManager.removeLoadingListener((_) {});
+    _chatManager.removeResponseListener((_) {});
+    _chatManager.removeErrorListener((_) {});
+
+    // 取消当前AI请求（如果不希望用户切换页面时取消，可以注释掉这一行）
+    // _chatManager.cancelCurrentRequest();
+
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -542,6 +654,7 @@ class _AIChatPageState extends State<AIChatPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final themeProvider = Provider.of<ThemeProvider>(context);
 
     return Scaffold(
       appBar: _isSelectionMode
@@ -585,10 +698,14 @@ class _AIChatPageState extends State<AIChatPage> {
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const CircleAvatar(
+                  CircleAvatar(
                     radius: 16,
-                    backgroundColor: Colors.orange,
-                    child: Text('🌻', style: TextStyle(fontSize: 16)),
+                    backgroundColor: themeProvider.followSystem
+                        ? theme.colorScheme.primary
+                        : theme.brightness == Brightness.dark
+                        ? Colors.orange.shade700
+                        : Colors.orange,
+                    child: const Text('🌻', style: TextStyle(fontSize: 16)),
                   ),
                   const SizedBox(width: 8),
                   const Text('小暖'),
@@ -627,7 +744,9 @@ class _AIChatPageState extends State<AIChatPage> {
                   isSelectionMode: _isSelectionMode,
                   isSelected: isSelected,
                   onLongPress: () => _enterSelectionMode(index),
-                  onTap: _isSelectionMode ? () => _toggleSelection(index) : null,
+                  onTap: _isSelectionMode
+                      ? () => _toggleSelection(index)
+                      : null,
                 );
               },
             ),
@@ -720,11 +839,19 @@ class _AIChatPageState extends State<AIChatPage> {
                   ),
                   const SizedBox(width: 8),
                   FloatingActionButton(
-                    onPressed: _isLoading ? null : _sendMessage,
+                    onPressed: (_isLoading || _controller.text.trim().isEmpty)
+                        ? null
+                        : _sendMessage,
                     mini: true,
+                    backgroundColor: theme.colorScheme.primary.withValues(
+                      alpha: _controller.text.trim().isEmpty ? 0.3 : 0.9,
+                    ),
+                    foregroundColor: Colors.white,
                     child: Icon(
                       Icons.send,
-                      color: _isLoading ? theme.disabledColor : Colors.white,
+                      color: (_isLoading || _controller.text.trim().isEmpty)
+                          ? theme.disabledColor.withValues(alpha: 0.5)
+                          : Colors.white,
                     ),
                   ),
                 ],
@@ -801,15 +928,18 @@ class _MessageBubble extends StatelessWidget {
             Flexible(
               child: Container(
                 margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
                 decoration: BoxDecoration(
                   color: theme.colorScheme.primary,
-                  borderRadius: BorderRadius.circular(18).copyWith(
-                    bottomRight: const Radius.circular(4),
-                  ),
+                  borderRadius: BorderRadius.circular(
+                    18,
+                  ).copyWith(bottomRight: const Radius.circular(4)),
                   border: isSelected
                       ? Border.all(color: theme.colorScheme.primary, width: 2)
                       : null,
@@ -854,15 +984,18 @@ class _MessageBubble extends StatelessWidget {
             Flexible(
               child: Container(
                 margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18).copyWith(
-                    bottomLeft: const Radius.circular(4),
-                  ),
+                  borderRadius: BorderRadius.circular(
+                    18,
+                  ).copyWith(bottomLeft: const Radius.circular(4)),
                   border: isSelected
                       ? Border.all(color: theme.colorScheme.primary, width: 2)
                       : null,

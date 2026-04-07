@@ -42,21 +42,27 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
-      child: MaterialApp(
-        title: '心情日记',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.light),
-          scaffoldBackgroundColor: Colors.white,
-        ),
-        darkTheme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.dark),
-          scaffoldBackgroundColor: const Color(0xFF121212),
-        ),
-        themeMode: ThemeMode.system,
-        home: const HomePage(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: '心情日记',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(
+              useMaterial3: true,
+              colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.light),
+              scaffoldBackgroundColor: Colors.white,
+            ),
+            darkTheme: ThemeData(
+              useMaterial3: true,
+              colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.dark),
+              scaffoldBackgroundColor: const Color(0xFF121212),
+            ),
+            themeMode: themeProvider.followSystem 
+                ? ThemeMode.system  // 跟随系统
+                : (themeProvider.nightMode ? ThemeMode.dark : ThemeMode.light),  // 手动选择
+            home: const HomePage(),
+          );
+        },
       ),
     );
   }

@@ -369,7 +369,7 @@ class _MoodListPageState extends State<MoodListPage> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: themeProvider.fontColor,
+                              color: _getCorrectColor(theme, themeProvider),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -377,7 +377,7 @@ class _MoodListPageState extends State<MoodListPage> {
                             todaySummary,
                             style: TextStyle(
                               fontSize: 14,
-                              color: themeProvider.fontColor.withValues(
+                              color: _getCorrectColor(theme, themeProvider).withValues(
                                 alpha: 0.8,
                               ),
                             ),
@@ -406,7 +406,7 @@ class _MoodListPageState extends State<MoodListPage> {
                             Text(
                               '暂无心情记录，快去写一条吧~',
                               style: TextStyle(
-                                color: themeProvider.fontColor,
+                                color: _getCorrectColor(theme, themeProvider),
                               ),
                             ),
                           ],
@@ -416,8 +416,8 @@ class _MoodListPageState extends State<MoodListPage> {
                   else ...[
                     // 心情记录列表
                     _isSelectionMode
-                        ? _buildSelectionModeList(logs, theme)
-                        : _buildNormalModeList(logs, theme),
+                        ? _buildSelectionModeList(logs, theme, themeProvider)
+                        : _buildNormalModeList(logs, theme, themeProvider),
                     // 底部间距，防止 FAB 遮挡
                     const SliverToBoxAdapter(
                       child: SizedBox(height: 80),
@@ -461,8 +461,19 @@ class _MoodListPageState extends State<MoodListPage> {
     );
   }
 
+  /// 获取正确的文字颜色
+  Color _getCorrectColor(ThemeData theme, ThemeProvider themeProvider) {
+    if (themeProvider.followSystem) {
+      // 使用系统主题的文字颜色
+      return theme.colorScheme.onSurface;
+    } else {
+      // 使用自定义的字体颜色
+      return themeProvider.fontColor;
+    }
+  }
+
   /// 构建批量选择模式的列表
-  Widget _buildSelectionModeList(List<MoodLog> logs, ThemeData theme) {
+  Widget _buildSelectionModeList(List<MoodLog> logs, ThemeData theme, ThemeProvider themeProvider) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
@@ -480,6 +491,7 @@ class _MoodListPageState extends State<MoodListPage> {
                   log.note,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: _getCorrectColor(theme, themeProvider)),
                 ),
                 subtitle: Text(
                   log.displayLabel,
@@ -504,7 +516,7 @@ class _MoodListPageState extends State<MoodListPage> {
   }
 
   /// 构建正常模式的列表（滑动删除）
-  Widget _buildNormalModeList(List<MoodLog> logs, ThemeData theme) {
+  Widget _buildNormalModeList(List<MoodLog> logs, ThemeData theme, ThemeProvider themeProvider) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {

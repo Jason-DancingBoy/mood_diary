@@ -8,17 +8,24 @@ class ThemeProvider with ChangeNotifier {
   bool _offlineMode = false;
   MessageFrequency _messageFrequency = MessageFrequency.onceDaily;
   MessageLogRange _messageLogRange = MessageLogRange.threeDays;
+  bool _nightMode = false;
+  bool _followSystem = true; // 默认为跟随系统
+  Color? _previousFontColor; // 用于保存关闭夜间模式前的字体颜色
 
   Color get fontColor => _fontColor;
   bool get offlineMode => _offlineMode;
   MessageFrequency get messageFrequency => _messageFrequency;
   MessageLogRange get messageLogRange => _messageLogRange;
+  bool get nightMode => _nightMode;
+  bool get followSystem => _followSystem;
 
   ThemeProvider() {
     _loadFontColor();
     _loadOfflineMode();
     _loadMessageFrequency();
     _loadMessageLogRange();
+    _loadNightMode();
+    _loadFollowSystem();
   }
 
   Future<void> _loadFontColor() async {
@@ -74,5 +81,41 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('offlineMode', value);
+  }
+
+  Future<void> _loadNightMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    _nightMode = prefs.getBool('nightMode') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> setNightMode(bool value) async {
+    _nightMode = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('nightMode', value);
+    
+    if (value) {
+      // 开启夜间模式：保存当前字体颜色，并设置为白色
+      _previousFontColor = _fontColor;
+      setFontColor(Colors.white);
+    } else {
+      // 关闭夜间模式：恢复之前保存的字体颜色，或使用默认黑色
+      final restoreColor = _previousFontColor ?? Colors.black;
+      setFontColor(restoreColor);
+    }
+  }
+
+  Future<void> _loadFollowSystem() async {
+    final prefs = await SharedPreferences.getInstance();
+    _followSystem = prefs.getBool('followSystem') ?? true; // 默认跟随系统
+    notifyListeners();
+  }
+
+  Future<void> setFollowSystem(bool value) async {
+    _followSystem = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('followSystem', value);
   }
 }

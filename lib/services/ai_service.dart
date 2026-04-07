@@ -10,7 +10,7 @@ class AIConfig {
       'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
   /// 模型名称
-  static const String model = 'qwen-turbo';
+  static const String model = 'qwen-turbo-latest';
 
   /// 请求超时时间（秒）
   static const int timeoutSeconds = 30;
@@ -116,10 +116,7 @@ class AIService {
     int? maxTokens,
     double? temperature,
   }) {
-    final body = {
-      'model': model,
-      'messages': messages,
-    };
+    final body = {'model': model, 'messages': messages};
     if (maxTokens != null) {
       body['max_tokens'] = maxTokens;
     }
@@ -164,11 +161,7 @@ class AIService {
     while (retries <= AIConfig.maxRetries) {
       try {
         final response = await http
-            .post(
-              Uri.parse(url),
-              headers: headers,
-              body: jsonEncode(body),
-            )
+            .post(Uri.parse(url), headers: headers, body: jsonEncode(body))
             .timeout(Duration(seconds: AIConfig.timeoutSeconds));
 
         return _parseResponse(response);
@@ -176,7 +169,9 @@ class AIService {
         if (retries < AIConfig.maxRetries) {
           retries++;
           if (kDebugMode) {
-            debugPrint('AI 请求超时，${retryDelay.inSeconds}秒后重试 ($retries/${AIConfig.maxRetries})');
+            debugPrint(
+              'AI 请求超时，${retryDelay.inSeconds}秒后重试 ($retries/${AIConfig.maxRetries})',
+            );
           }
           await Future.delayed(retryDelay);
           retryDelay *= 2; // 指数退避
@@ -187,7 +182,9 @@ class AIService {
         if (retries < AIConfig.maxRetries && e.toString().contains('服务器错误')) {
           retries++;
           if (kDebugMode) {
-            debugPrint('AI 请求失败，${retryDelay.inSeconds}秒后重试 ($retries/${AIConfig.maxRetries})');
+            debugPrint(
+              'AI 请求失败，${retryDelay.inSeconds}秒后重试 ($retries/${AIConfig.maxRetries})',
+            );
           }
           await Future.delayed(retryDelay);
           retryDelay *= 2;
@@ -217,8 +214,10 @@ class AIService {
     try {
       final key = _getApiKey(apiKey);
       final messages = [
-        ChatMessage(role: MessageRole.system, content: comfortSystemPrompt)
-            .toMap(),
+        ChatMessage(
+          role: MessageRole.system,
+          content: comfortSystemPrompt,
+        ).toMap(),
         ChatMessage(
           role: MessageRole.user,
           content: '用户的心情：$mood\n日记内容：$content',
@@ -265,8 +264,10 @@ class AIService {
     try {
       final key = _getApiKey(apiKey);
       final List<Map<String, String>> apiMessages = [
-        ChatMessage(role: MessageRole.system, content: counselorSystemPrompt)
-            .toMap(),
+        ChatMessage(
+          role: MessageRole.system,
+          content: counselorSystemPrompt,
+        ).toMap(),
       ];
 
       // 处理历史消息
@@ -276,7 +277,9 @@ class AIService {
         } else if (msg is List && msg.length >= 2) {
           final roleStr = msg[0].toString();
           final content = msg[1].toString();
-          final role = roleStr == '0' ? MessageRole.user : MessageRole.assistant;
+          final role = roleStr == '0'
+              ? MessageRole.user
+              : MessageRole.assistant;
           apiMessages.add(ChatMessage(role: role, content: content).toMap());
         }
       }
@@ -328,7 +331,8 @@ class AIService {
       final key = _getApiKey(apiKey);
       final notesText = recentNotes.map((n) => '- $n').join('\n');
 
-      final mailPrompt = '''
+      final mailPrompt =
+          '''
 你是小暖，一位温暖的心理陪伴者。用户最近记录了以下心情日记：
 
 $notesText

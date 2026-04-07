@@ -7,6 +7,19 @@ import '../providers/theme_provider.dart';
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
+  /// 获取正确的文字颜色
+  /// 当跟随系统开启时使用系统主题的颜色
+  /// 当跟随系统关闭时使用自定义的字体颜色
+  Color _getCorrectColor(ThemeProvider themeProvider, ThemeData theme) {
+    if (themeProvider.followSystem) {
+      // 使用系统主题的文字颜色
+      return theme.colorScheme.onSurface;
+    } else {
+      // 使用自定义的字体颜色
+      return themeProvider.fontColor;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
@@ -25,30 +38,85 @@ class ProfilePage extends StatelessWidget {
             leading: const Icon(Icons.palette),
             title: Text(
               '字体颜色设置',
-              style: TextStyle(color: themeProvider.fontColor),
-            ),
-            subtitle: Text(
-              '设置整个应用的字体颜色',
               style: TextStyle(
-                color: themeProvider.fontColor.withValues(alpha: 0.7),
+                color: _getCorrectColor(themeProvider, theme),
               ),
             ),
-            onTap: () => _showColorPicker(context, themeProvider),
+            subtitle: Text(
+              themeProvider.followSystem
+                  ? '跟随系统已开启，使用系统默认颜色'
+                  : '设置整个应用的字体颜色',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+              ),
+            ),
+            onTap: themeProvider.followSystem 
+                ? null  // 跟随系统开启时禁用字体颜色设置
+                : () => _showColorPicker(context, themeProvider),
           ),
           SwitchListTile(
             secondary: const Icon(Icons.wifi_off),
             title: Text(
               '断网模式',
-              style: TextStyle(color: themeProvider.fontColor),
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
             ),
             subtitle: Text(
               '开启后小暖回复默认关闭，且应用不再联网请求 AI 内容',
               style: TextStyle(
-                color: themeProvider.fontColor.withValues(alpha: 0.7),
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
               ),
             ),
             value: themeProvider.offlineMode,
             onChanged: (value) => themeProvider.setOfflineMode(value),
+          ),
+          SwitchListTile(
+            secondary: Icon(
+              themeProvider.nightMode ? Icons.nightlight_round : Icons.light_mode,
+              color: themeProvider.followSystem 
+                  ? themeProvider.fontColor.withValues(alpha: 0.3)
+                  : null,
+            ),
+            title: Text(
+              '夜间模式',
+              style: TextStyle(
+                color: themeProvider.followSystem
+                    ? _getCorrectColor(themeProvider, theme).withValues(alpha: 0.3)
+                    : _getCorrectColor(themeProvider, theme),
+              ),
+            ),
+            subtitle: Text(
+              themeProvider.followSystem
+                  ? '跟随系统已开启，夜间模式设置无效'
+                  : '开启后界面变暗，文字自动变白，保护眼睛',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(
+                  alpha: themeProvider.followSystem ? 0.5 : 0.7,
+                ),
+              ),
+            ),
+            value: themeProvider.nightMode,
+            onChanged: themeProvider.followSystem 
+                ? null  // 跟随系统开启时禁用夜间模式开关
+                : (value) => themeProvider.setNightMode(value),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.settings_system_daydream),
+            title: Text(
+              '跟随系统',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
+            ),
+            subtitle: Text(
+              '开启后应用主题跟随系统日间/夜间模式自动切换',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+              ),
+            ),
+            value: themeProvider.followSystem,
+            onChanged: (value) => themeProvider.setFollowSystem(value),
           ),
           const Divider(),
           // 小暖消息设置区域
@@ -67,12 +135,14 @@ class ProfilePage extends StatelessWidget {
             leading: const Icon(Icons.schedule),
             title: Text(
               '消息发送频率',
-              style: TextStyle(color: themeProvider.fontColor),
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
             ),
             subtitle: Text(
               themeProvider.messageFrequency.label,
               style: TextStyle(
-                color: themeProvider.fontColor.withValues(alpha: 0.7),
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
               ),
             ),
             trailing: const Icon(Icons.chevron_right),
@@ -82,12 +152,14 @@ class ProfilePage extends StatelessWidget {
             leading: const Icon(Icons.date_range),
             title: Text(
               '消息读取记录范围',
-              style: TextStyle(color: themeProvider.fontColor),
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
             ),
             subtitle: Text(
               themeProvider.messageLogRange.label,
               style: TextStyle(
-                color: themeProvider.fontColor.withValues(alpha: 0.7),
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
               ),
             ),
             trailing: const Icon(Icons.chevron_right),
@@ -95,11 +167,13 @@ class ProfilePage extends StatelessWidget {
           ),
           ListTile(
             leading: const Icon(Icons.info),
-            title: Text('关于', style: TextStyle(color: themeProvider.fontColor)),
+            title: Text('关于', style: TextStyle(
+              color: _getCorrectColor(themeProvider, theme),
+            )),
             subtitle: Text(
               '版本 1.0.0',
               style: TextStyle(
-                color: themeProvider.fontColor.withValues(alpha: 0.7),
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
               ),
             ),
             onTap: () {

@@ -367,6 +367,17 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
     final appBarTextColor =
         theme.colorScheme.onPrimaryContainer ?? Colors.white;
 
+    // 获取正确的文字颜色（本地函数）
+    Color getCorrectColor() {
+      if (themeProvider.followSystem) {
+        // 使用系统主题的文字颜色
+        return theme.colorScheme.onSurface;
+      } else {
+        // 使用自定义的字体颜色
+        return themeProvider.fontColor;
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('记录详情'),
@@ -423,7 +434,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: themeProvider.fontColor,
+                                color: getCorrectColor(),
                               ),
                             ),
                           ],
@@ -432,7 +443,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                         Text(
                           '笔记:',
                           style: theme.textTheme.titleMedium?.copyWith(
-                            color: themeProvider.fontColor,
+                            color: getCorrectColor(),
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -442,14 +453,14 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                               : '（无）',
                           style: TextStyle(
                             fontSize: 16,
-                            color: themeProvider.fontColor,
+                            color: getCorrectColor(),
                           ),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           '日期: ${_currentLog.createdAt.toString()}',
                           style: TextStyle(
-                            color: themeProvider.fontColor.withValues(
+                            color: getCorrectColor().withValues(
                               alpha: 0.7,
                             ),
                           ),
@@ -556,7 +567,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                   Text(
                     'AI 机制',
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: themeProvider.fontColor,
+                      color: getCorrectColor(),
                     ),
                   ),
                   // TextButton(
@@ -589,13 +600,13 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                             Text(
                               '启用小暖回复',
                               style: theme.textTheme.titleMedium?.copyWith(
-                                color: themeProvider.fontColor,
+                                color: getCorrectColor(),
                               ),
                             ),
                             Text(
                               '让AI小暖为这条记录提供温暖的回应',
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: themeProvider.fontColor.withValues(
+                                color: getCorrectColor().withValues(
                                   alpha: 0.7,
                                 ),
                               ),
@@ -632,7 +643,11 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                   key: _aiCardKey,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.purple.shade50,
+                    color: themeProvider.followSystem
+                        ? theme.colorScheme.primaryContainer.withValues(alpha: 77)
+                        : theme.brightness == Brightness.dark
+                            ? Colors.purple.shade700.withValues(alpha: 77)
+                            : Colors.purple.shade50,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
@@ -640,14 +655,21 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.favorite, color: Colors.purple.shade300),
+                          Icon(
+                            Icons.favorite,
+                            color: theme.brightness == Brightness.dark
+                                ? Colors.purple.shade200
+                                : Colors.purple.shade700,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             '小暖对你说',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: Colors.purple.shade700,
+                              color: theme.brightness == Brightness.dark
+                                  ? Colors.purple.shade200
+                                  : Colors.purple.shade700,
                             ),
                           ),
                         ],
@@ -660,7 +682,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                           _aiResponse!,
                           style: TextStyle(
                             fontSize: 14,
-                            color: themeProvider.fontColor,
+                            color: getCorrectColor(),
                           ),
                         ),
                     ],

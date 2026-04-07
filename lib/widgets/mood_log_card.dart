@@ -38,6 +38,18 @@ class MoodLogCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final theme = Theme.of(context);
+
+    // 获取正确的文字颜色（本地函数）
+    Color getCorrectColor() {
+      if (themeProvider.followSystem) {
+        // 使用系统主题的文字颜色
+        return theme.colorScheme.onSurface;
+      } else {
+        // 使用自定义的字体颜色
+        return themeProvider.fontColor;
+      }
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -55,7 +67,7 @@ class MoodLogCard extends StatelessWidget {
             log.note,
             style: TextStyle(
               fontWeight: FontWeight.w500,
-              color: themeProvider.fontColor,
+              color: getCorrectColor(),
             ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -85,7 +97,7 @@ class MoodLogCard extends StatelessWidget {
                       _timeString,
                       style: TextStyle(
                         fontSize: 12,
-                        color: themeProvider.fontColor.withValues(alpha: 0.7),
+                        color: getCorrectColor().withValues(alpha: 0.7),
                       ),
                     ),
                   ],
@@ -98,7 +110,7 @@ class MoodLogCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontStyle: FontStyle.italic,
-                    color: themeProvider.fontColor.withValues(alpha: 0.7),
+                    color: getCorrectColor().withValues(alpha: 0.7),
                   ),
                 ),
               ],
