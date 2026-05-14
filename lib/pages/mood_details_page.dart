@@ -82,6 +82,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
           _currentLog.mood.label,
           _currentLog.note,
           offlineMode: themeProvider.offlineMode,
+          apiKey: themeProvider.apiKey,
         );
         if (comfort.isEmpty) {
           setState(() {
@@ -420,7 +421,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                                   _currentLog.mood.color,
                               child: _currentLog.customEmoji != null
                                   ? Text(
-                                      _currentLog.customEmoji!,
+                                      _currentLog.customEmoji ?? '',
                                       style: const TextStyle(fontSize: 24),
                                     )
                                   : Icon(

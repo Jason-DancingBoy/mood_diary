@@ -71,6 +71,25 @@ class ProfilePage extends StatelessWidget {
             value: themeProvider.offlineMode,
             onChanged: (value) => themeProvider.setOfflineMode(value),
           ),
+          ListTile(
+            leading: const Icon(Icons.vpn_key),
+            title: Text(
+              'AI API Key',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
+            ),
+            subtitle: Text(
+              themeProvider.apiKey.isEmpty
+                  ? '未设置 API Key，AI 功能需要输入'
+                  : '已设置 API Key，点击修改',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showApiKeyDialog(context, themeProvider),
+          ),
           SwitchListTile(
             secondary: Icon(
               themeProvider.nightMode ? Icons.nightlight_round : Icons.light_mode,
@@ -179,6 +198,53 @@ class ProfilePage extends StatelessWidget {
             onTap: () {
               // 可以添加关于页面的逻辑
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showApiKeyDialog(BuildContext context, ThemeProvider themeProvider) {
+    final controller = TextEditingController(text: themeProvider.apiKey);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('AI API Key'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: '请输入 API Key',
+            hintText: 'sk-...',
+          ),
+        ),
+        actions: [
+          if (themeProvider.apiKey.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                themeProvider.clearApiKey();
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('API Key 已清除')),
+                );
+              },
+              child: const Text('清除', style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              themeProvider.setApiKey(controller.text.trim());
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('API Key 已保存')),
+              );
+            },
+            child: const Text('保存'),
           ),
         ],
       ),

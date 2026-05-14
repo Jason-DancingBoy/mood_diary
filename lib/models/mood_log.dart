@@ -78,9 +78,12 @@ class MoodLog {
 
   Color? get customColor => customColorValue != null ? Color(customColorValue!) : null;
   String get displayLabel {
-    // 优先级：自定义标签 > 系统心情标签
+    // 优先级：自定义标签 > 自定义心情标记 > 系统心情标签
     if (customEmojiLabel != null && customEmojiLabel!.trim().isNotEmpty) {
       return customEmojiLabel!.trim();
+    }
+    if (customEmoji != null) {
+      return '自定义';
     }
     return mood.label;
   }

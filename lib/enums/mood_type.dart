@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
 enum MoodType {
+  blissful,
   happy,
   calm,
   sad,
   anxious,
+  guilty,
   angry,
-  blissful,
   fear,
   surprise,
   disgust,
@@ -15,6 +16,8 @@ enum MoodType {
 extension MoodExtension on MoodType {
   String get label {
     switch (this) {
+      case MoodType.blissful:
+        return '幸福';
       case MoodType.happy:
         return '开心';
       case MoodType.calm:
@@ -23,10 +26,10 @@ extension MoodExtension on MoodType {
         return '难过';
       case MoodType.anxious:
         return '焦虑';
+      case MoodType.guilty:
+        return '内疚';
       case MoodType.angry:
         return '生气';
-      case MoodType.blissful:
-        return '幸福';
       case MoodType.fear:
         return '恐惧';
       case MoodType.surprise:
@@ -38,6 +41,8 @@ extension MoodExtension on MoodType {
 
   IconData get icon {
     switch (this) {
+      case MoodType.blissful:
+        return Icons.sentiment_very_satisfied;
       case MoodType.happy:
         return Icons.sentiment_satisfied;
       case MoodType.calm:
@@ -46,10 +51,10 @@ extension MoodExtension on MoodType {
         return Icons.sentiment_dissatisfied;
       case MoodType.anxious:
         return Icons.sentiment_very_dissatisfied;
+      case MoodType.guilty:
+        return Icons.mood_bad;
       case MoodType.angry:
         return Icons.sentiment_very_dissatisfied;
-      case MoodType.blissful:
-        return Icons.sentiment_very_satisfied;
       case MoodType.fear:
         return Icons.warning; // ⚠️ 恐惧/危险
       case MoodType.surprise:
@@ -60,24 +65,26 @@ extension MoodExtension on MoodType {
   }
 
   static final Map<MoodType, Color> _colors = {
+    MoodType.blissful: Colors.deepOrangeAccent,
     MoodType.happy: Colors.pink,
     MoodType.calm: Colors.teal,
     MoodType.sad: Colors.blue,
     MoodType.anxious: Colors.purple,
+    MoodType.guilty: Colors.brown,
     MoodType.angry: Colors.red,
-    MoodType.blissful: Colors.deepOrangeAccent,
     MoodType.fear: Colors.indigo, // 恐惧：靛蓝色 (深沉、压抑的感觉) 或者 Colors.blueGrey
     MoodType.surprise: Colors.amber, // 惊讶：琥珀色/金黄色 (像灯泡亮起或震惊的金光)
     MoodType.disgust: Colors.lime, // 厌恶：黄绿色 (这种颜色通常让人联想到变质食物或恶心感)
   };
 
   static final Map<MoodType, Color> _bgColors = {
+    MoodType.blissful: Colors.deepOrangeAccent.withValues(alpha: 0.15),
     MoodType.happy: Colors.pink.withValues(alpha: 0.15),
     MoodType.calm: Colors.teal.withValues(alpha: 0.15),
     MoodType.sad: Colors.blue.withValues(alpha: 0.15),
     MoodType.anxious: Colors.purple.withValues(alpha: 0.15),
+    MoodType.guilty: Colors.brown.withValues(alpha: 0.15),
     MoodType.angry: Colors.red.withValues(alpha: 0.15),
-    MoodType.blissful: Colors.deepOrangeAccent.withValues(alpha: 0.15),
     MoodType.fear: Colors.indigo.withValues(
       alpha: 0.15,
     ), // 恐惧：靛蓝色 (深沉、压抑的感觉) 或者 Colors.blueGrey
@@ -89,8 +96,8 @@ extension MoodExtension on MoodType {
     ), // 厌恶：黄绿色 (这种颜色通常让人联想到变质食物或恶心感)
   };
 
-  Color get color => _colors[this]!;
-  Color get bgColor => _bgColors[this]!;
+  Color get color => _colors[this] ?? Colors.grey;
+  Color get bgColor => _bgColors[this] ?? Colors.grey.withValues(alpha: 0.15);
 
   /// 心情分数 (1-10分，越高越积极)
   int get score {
@@ -103,10 +110,12 @@ extension MoodExtension on MoodType {
         return 7; // 平静
       case MoodType.surprise:
         return 6; // 惊讶
-      case MoodType.anxious:
-        return 4; // 焦虑
       case MoodType.sad:
         return 3; // 难过
+      case MoodType.anxious:
+        return 4; // 焦虑
+      case MoodType.guilty:
+        return 2; // 内疚
       case MoodType.fear:
         return 2; // 恐惧
       case MoodType.angry:

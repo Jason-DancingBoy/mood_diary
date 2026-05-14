@@ -60,7 +60,7 @@ class MoodLogCard extends StatelessWidget {
           leading: CircleAvatar(
             backgroundColor: log.customColor ?? log.mood.color,
             child: log.customEmoji != null
-                ? Text(log.customEmoji!, style: const TextStyle(fontSize: 20))
+                ? Text(log.customEmoji ?? '', style: const TextStyle(fontSize: 20))
                 : Icon(log.mood.icon, color: Colors.white),
           ),
           title: Text(

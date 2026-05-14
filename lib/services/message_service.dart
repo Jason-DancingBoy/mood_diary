@@ -31,6 +31,28 @@ class MessageService {
     '自己不够',
   ];
 
+  // ===== 主题关键词 =====
+  static const Map<String, List<String>> _themeKeywords = {
+    '工作': ['工作', '上班', '加班', '同事', '老板', '项目', '任务', '会议', '报告', '绩效'],
+    '学习': ['学习', '考试', '作业', '课程', '老师', '学校', '读书', '复习', '知识', '进步'],
+    '家庭': ['家人', '父母', '孩子', '爸爸', '妈妈', '爷爷', '奶奶', '丈夫', '妻子', '亲戚'],
+    '朋友': ['朋友', '同学', '闺蜜', '哥们', '聚会', '聊天', '陪伴', '支持', '友谊'],
+    '健康': ['身体', '生病', '医院', '医生', '锻炼', '运动', '饮食', '睡眠', '疲惫', '健康'],
+    '爱情': ['恋爱', '男友', '女友', '喜欢', '感情', '分手', '结婚', '约会', '暧昧'],
+    '自我': ['自己', '成长', '改变', '反思', '目标', '梦想', '未来', '过去', '现在'],
+    '压力': ['压力', '焦虑', '紧张', '担心', '害怕', '恐惧', '不安', '崩溃', '负担'],
+    '成就': ['成功', '完成', '进步', '突破', '骄傲', '自信', '满意', '收获'],
+    '休闲': ['休息', '娱乐', '旅行', '电影', '音乐', '游戏', '放松', '假期'],
+  };
+
+  // ===== 情感强度词汇 =====
+  static const Map<String, List<String>> _emotionIntensity = {
+    '强烈正面': ['超级', '非常', '特别', '极度', '无比', '太棒了', '爱死', '兴奋'],
+    '温和正面': ['还好', '不错', '开心', '愉快', '满意', '舒服', '轻松'],
+    '强烈负面': ['超级', '非常', '特别', '极度', '无比', '太糟了', '崩溃', '绝望'],
+    '温和负面': ['有点', '稍微', '还行', '一般', '郁闷', '烦躁', '疲惫'],
+  };
+
   // ===== 积极心理学研究结论 =====
   static const List<Map<String, String>> _positivePsychologyInsights = [
     {'text': '研究表明，表达感恩可以显著提升幸福感。', 'author': '积极心理学'},
@@ -181,6 +203,61 @@ class MessageService {
     '愿你找到内心的平静。',
   ];
 
+  /// 分析日志内容，返回主题和情感洞察
+  static Map<String, dynamic> _analyzeLogContent(List<MoodLog> logs) {
+    final themes = <String, int>{};
+    final emotions = <String, int>{};
+    final hasImages = logs.any((log) => log.imageCount > 0);
+    final hasComments = logs.any((log) => log.comment.isNotEmpty);
+    final cognitiveBiases = <String>[];
+
+    for (final log in logs) {
+      final content = '${log.note} ${log.comment}'.toLowerCase();
+
+      // 检测主题
+      for (final entry in _themeKeywords.entries) {
+        final theme = entry.key;
+        final keywords = entry.value;
+        if (keywords.any((keyword) => content.contains(keyword))) {
+          themes[theme] = (themes[theme] ?? 0) + 1;
+        }
+      }
+
+      // 检测情感强度
+      for (final entry in _emotionIntensity.entries) {
+        final intensity = entry.key;
+        final words = entry.value;
+        if (words.any((word) => content.contains(word))) {
+          emotions[intensity] = (emotions[intensity] ?? 0) + 1;
+        }
+      }
+
+      // 检测认知偏差
+      for (final pattern in _cognitivePatterns) {
+        if (content.contains(pattern)) {
+          if (!cognitiveBiases.contains(pattern)) {
+            cognitiveBiases.add(pattern);
+          }
+        }
+      }
+    }
+
+    // 找出主要主题
+    final mainThemes = themes.entries
+        .where((e) => e.value > 0)
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return {
+      'mainThemes': mainThemes.take(3).map((e) => e.key).toList(),
+      'emotions': emotions,
+      'hasImages': hasImages,
+      'hasComments': hasComments,
+      'cognitiveBiases': cognitiveBiases,
+      'totalLogs': logs.length,
+    };
+  }
+
   /// 生成每日消息
   /// [logs] 心情记录列表
   /// [range] 读取记录的时间范围，默认三天
@@ -194,14 +271,15 @@ class MessageService {
       return _getNoLogsMessage(range);
     }
 
+    final analysis = _analyzeLogContent(recentLogs);
     final negativeLogs = recentLogs.where((log) => !_positiveMoods.contains(log.mood)).toList();
-    final hasCognitiveBias = _hasCognitiveBias(recentLogs);
+    final hasCognitiveBias = (analysis['cognitiveBiases'] as List<String>).isNotEmpty;
 
     if (negativeLogs.isEmpty) {
-      return _buildPositiveMessage(recentLogs, range);
+      return _buildPositiveMessage(recentLogs, range, analysis);
     }
 
-    return _buildSupportiveMessage(recentLogs, hasCognitiveBias, range);
+    return _buildSupportiveMessage(recentLogs, hasCognitiveBias, range, analysis);
   }
 
   static String _getNoLogsMessage(MessageLogRange range) {
@@ -232,13 +310,6 @@ class MessageService {
     }).toList();
   }
 
-  static bool _hasCognitiveBias(List<MoodLog> logs) {
-    return logs.any((log) {
-      final note = log.note.toLowerCase();
-      return _cognitivePatterns.any((pattern) => note.contains(pattern));
-    });
-  }
-
   static String _pickRandom(List<String> list) {
     return list[_random.nextInt(list.length)];
   }
@@ -257,16 +328,45 @@ class MessageService {
     return '"${quote['text']}" — ${quote['author']}';
   }
 
-  static String _buildPositiveMessage(List<MoodLog> logs, MessageLogRange range) {
+  static String _buildPositiveMessage(List<MoodLog> logs, MessageLogRange range, Map<String, dynamic> analysis) {
     final moodLabels = logs.map((log) => log.mood.label).toSet().join('、');
     final count = logs.length;
+    final mainThemes = analysis['mainThemes'] as List<String>;
+    final hasImages = analysis['hasImages'] as bool;
+    final hasComments = analysis['hasComments'] as bool;
 
     final buffer = StringBuffer();
     buffer.writeln(_pickRandom(_positiveOpenings));
     buffer.writeln();
+
+    // 个性化总结
     buffer.writeln('${range.label}你记录了$count次心情，主要是$moodLabels。');
+    if (mainThemes.isNotEmpty) {
+      buffer.writeln('小暖注意到你最近在关注${mainThemes.join('、')}方面的事情，这很好。');
+    }
+    if (hasImages) {
+      buffer.writeln('看到你还分享了照片，这些视觉记录让你的心情故事更加生动。');
+    }
+    if (hasComments) {
+      buffer.writeln('你写下的那些思考和反思，都被小暖认真读过了。');
+    }
+
     buffer.writeln(_pickRandom(_positiveDescriptions));
     buffer.writeln();
+
+    // 根据主题选择相关建议
+    if (mainThemes.contains('工作')) {
+      buffer.writeln('工作上的付出总会有回报，记得给自己一些认可。');
+    } else if (mainThemes.contains('学习')) {
+      buffer.writeln('学习是一场马拉松，坚持就是胜利。');
+    } else if (mainThemes.contains('家庭')) {
+      buffer.writeln('家庭的温暖是最坚实的后盾。');
+    } else if (mainThemes.contains('朋友')) {
+      buffer.writeln('真挚的友谊是人生最大的财富。');
+    } else if (mainThemes.contains('健康')) {
+      buffer.writeln('照顾好身体，才能更好地拥抱生活。');
+    }
+
     // 使用积极消息专用名言
     buffer.writeln(_formatQuote(_pickContextualQuote(true)));
 
@@ -285,26 +385,61 @@ class MessageService {
     return buffer.toString().trim();
   }
 
-  static String _buildSupportiveMessage(List<MoodLog> logs, bool hasCognitiveBias, MessageLogRange range) {
+  static String _buildSupportiveMessage(List<MoodLog> logs, bool hasCognitiveBias, MessageLogRange range, Map<String, dynamic> analysis) {
     final moodSummary = logs.map((log) => log.mood.label).toSet().join('、');
+    final mainThemes = analysis['mainThemes'] as List<String>;
+    final cognitiveBiases = analysis['cognitiveBiases'] as List<String>;
+    final hasImages = analysis['hasImages'] as bool;
+    final hasComments = analysis['hasComments'] as bool;
 
     final buffer = StringBuffer();
     buffer.writeln(_pickRandom(_supportiveOpenings));
     buffer.writeln();
 
+    // 个性化开头
+    if (mainThemes.isNotEmpty) {
+      buffer.writeln('小暖看到你最近在经历${mainThemes.join('、')}方面的事情，${range.label}记录了$moodSummary的情绪。');
+    } else {
+      buffer.writeln('${range.label}$moodSummary的情绪是真实的，小暖都收到了。');
+    }
+
+    if (hasImages) {
+      buffer.writeln('你分享的照片，让小暖更能感受到你的心情。');
+    }
+    if (hasComments) {
+      buffer.writeln('你写下的那些深层思考，小暖都认真读过了。');
+    }
+
     if (hasCognitiveBias) {
-      buffer.writeln('小暖注意到你${range.label}可能有"总是""从不"这样的想法。心理学上，这叫做"认知扭曲"——大脑有时会用不准确的方式解读现实。');
+      buffer.writeln('小暖注意到你可能有${cognitiveBiases.take(2).join('、')}这样的想法。心理学上，这叫做"认知扭曲"——大脑有时会用不准确的方式解读现实。');
       buffer.writeln(_pickRandom([
         '荣格曾说，最可怕的事情是完全接受自己——其实更可怕的是用错误的尺子衡量自己。',
         '阿德勒提醒我们：我们不是因为看见而相信，而是因为相信而看见。',
         '试着问自己：这个想法有证据支持吗？有没有其他可能的解释？',
       ]));
     } else {
-      buffer.writeln('${range.label}$moodSummary的情绪是真实的，小暖都收到了。');
       buffer.writeln(_pickRandom(_supportiveDescriptions));
     }
 
     buffer.writeln();
+
+    // 根据主题提供针对性支持
+    if (mainThemes.contains('工作')) {
+      buffer.writeln('工作压力大时，记得给自己喘息的空间。');
+    } else if (mainThemes.contains('学习')) {
+      buffer.writeln('学习路上难免有挫折，但每一步都在积累。');
+    } else if (mainThemes.contains('家庭')) {
+      buffer.writeln('家庭关系有时候复杂，但爱一直都在。');
+    } else if (mainThemes.contains('朋友')) {
+      buffer.writeln('友谊需要维护，也需要理解。');
+    } else if (mainThemes.contains('健康')) {
+      buffer.writeln('身体发出信号时，要认真倾听。');
+    } else if (mainThemes.contains('爱情')) {
+      buffer.writeln('感情的事，没有标准答案，只有真心。');
+    } else if (mainThemes.contains('自我')) {
+      buffer.writeln('自我探索的旅程，从不轻松，但值得。');
+    }
+
     // 使用支持性消息专用名言
     buffer.writeln(_formatQuote(_pickContextualQuote(false)));
 

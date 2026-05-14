@@ -22,6 +22,7 @@ class AIChatManager {
     List<dynamic> history,
     String newMessage, {
     bool offlineMode = false,
+    String? apiKey,
   }) async {
     // 如果有正在进行的请求，先取消它
     if (_currentRequest != null) {
@@ -36,7 +37,7 @@ class AIChatManager {
     final completer = Completer<String>();
     _currentCompleter = completer;
 
-    _currentRequest = _executeAIRequest(history, newMessage, offlineMode)
+    _currentRequest = _executeAIRequest(history, newMessage, offlineMode, apiKey: apiKey)
         .then((response) {
           completer.complete(response);
           _currentRequest = null;
@@ -60,14 +61,15 @@ class AIChatManager {
   Future<String> _executeAIRequest(
     List<dynamic> history,
     String newMessage,
-    bool offlineMode,
-  ) async {
+    bool offlineMode, {
+    String? apiKey,
+  }) async {
     if (offlineMode) {
       return '当前处于离线模式，无法与小暖对话。请检查网络设置。';
     }
 
     try {
-      final response = await AIService.chat(history, newMessage);
+      final response = await AIService.chat(history, newMessage, apiKey: apiKey);
       _notifyResponse(response);
       return response;
     } catch (e) {

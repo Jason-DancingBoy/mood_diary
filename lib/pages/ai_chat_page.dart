@@ -346,6 +346,7 @@ class _AIChatPageState extends State<AIChatPage> {
         history,
         text,
         offlineMode: themeProvider.offlineMode,
+        apiKey: themeProvider.apiKey,
       );
       // 注意：加载状态、响应和错误现在由监听器处理
     } catch (e) {

@@ -23,15 +23,7 @@ class LogEditorDialog extends StatefulWidget {
 class _LogEditorDialogState extends State<LogEditorDialog> {
   late MoodType _selectedMood;
   late TextEditingController _noteController;
-  late TextEditingController _customEmojiLabelController;
   late bool _aiEnabled;
-
-  // 存储自定义表情的数据
-  String? _customEmoji;
-  int? _customColorValue;
-
-  // 标记当前是否正在使用自定义表情
-  bool _isCustomMode = false;
 
   // 图片相关 - 支持多图片
   List<String> _imageFileNames = [];
@@ -44,17 +36,7 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
     _noteController = TextEditingController(
       text: widget.initialLog?.note ?? '',
     );
-    _customEmojiLabelController = TextEditingController(
-      text: widget.initialLog?.customEmojiLabel ?? '',
-    );
     _aiEnabled = widget.initialLog?.aiEnabled ?? true;
-
-    // 初始化自定义数据
-    _customEmoji = widget.initialLog?.customEmoji;
-    _customColorValue = widget.initialLog?.customColorValue;
-
-    // 关键：如果初始日志中有自定义表情，则默认进入自定义模式
-    _isCustomMode = (widget.initialLog?.customEmoji != null);
 
     // 初始化图片
     if (widget.initialLog?.imageFileNames != null) {
@@ -111,186 +93,7 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
   @override
   void dispose() {
     _noteController.dispose();
-    _customEmojiLabelController.dispose();
     super.dispose();
-  }
-
-  Future<void> _showCustomEmotionPicker() async {
-    final theme = Theme.of(context);
-    const customEmojis = [
-      '😊',
-      '😂',
-      '🥰',
-      '😢',
-      '😡',
-      '😱',
-      '😍',
-      '🤔',
-      '🙌',
-      '🥳',
-      '😴',
-      '😇',
-      '😎',
-      '💖',
-      '🎉',
-      '🌈',
-      '🫶',
-      '✨',
-      '🍀',
-      '🔥',
-    ];
-    final customColors = [
-      Colors.red,
-      Colors.pink,
-      Colors.orange,
-      Colors.amber,
-      Colors.yellow,
-      Colors.green,
-      Colors.teal,
-      Colors.blue,
-      Colors.indigo,
-      Colors.purple,
-      Colors.brown,
-      Colors.grey,
-      Colors.black,
-    ];
-
-    // 使用临时变量，避免未保存时污染当前状态
-    String? tempSelectedEmoji = _customEmoji;
-    int? tempSelectedColor =
-        _customColorValue ?? _selectedMood.color.toARGB32();
-    final labelController = TextEditingController(
-      text: _customEmojiLabelController.text,
-    );
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('选择自定义表情'),
-              content: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('请选择表情'),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: customEmojis.map((emoji) {
-                        final selected = emoji == tempSelectedEmoji;
-                        return ChoiceChip(
-                          label: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 20),
-                          ),
-                          selected: selected,
-                          selectedColor: theme.colorScheme.primary,
-                          onSelected: (_) =>
-                              setState(() => tempSelectedEmoji = emoji),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text('请选择颜色'),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: customColors.map((color) {
-                        final selected = tempSelectedColor == color.toARGB32();
-                        return GestureDetector(
-                          onTap: () => setState(
-                            () => tempSelectedColor = color.toARGB32(),
-                          ),
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                              border: selected
-                                  ? Border.all(
-                                      color: theme.colorScheme.onPrimary,
-                                      width: 3,
-                                    )
-                                  : null,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: labelController,
-                      decoration: InputDecoration(
-                        labelText: '情绪描述',
-                        hintText: '例如：愉快、平静、期待',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onChanged: (_) {},
-                    ),
-                    const SizedBox(height: 16),
-                    if (tempSelectedEmoji != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Text('预览：'),
-                              const SizedBox(width: 8),
-                              CircleAvatar(
-                                backgroundColor: Color(tempSelectedColor!),
-                                child: Text(
-                                  tempSelectedEmoji!,
-                                  style: const TextStyle(fontSize: 20),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (labelController.text.trim().isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Text('描述：${labelController.text.trim()}'),
-                          ],
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('取消'),
-                ),
-                ElevatedButton(
-                  onPressed: tempSelectedEmoji == null
-                      ? null
-                      : () => Navigator.pop(context, true),
-                  child: const Text('保存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    if (confirmed == true && tempSelectedEmoji != null) {
-      setState(() {
-        _customEmoji = tempSelectedEmoji;
-        _customColorValue = tempSelectedColor;
-        _customEmojiLabelController.text = labelController.text.trim();
-        _isCustomMode = true; // 明确进入自定义模式
-        // 如果当前基础心情仍是默认的 calm，自动切换到 happy 作为基础心情
-        if (_selectedMood == MoodType.calm) {
-          _selectedMood = MoodType.happy;
-        }
-      });
-    }
   }
 
   @override
@@ -355,8 +158,7 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: MoodType.values.map((mood) {
-                    // 只有当 NOT 处于自定义模式，且当前 mood 等于 _selectedMood 时才高亮
-                    final isSelected = !_isCustomMode && _selectedMood == mood;
+                    final isSelected = _selectedMood == mood;
 
                     return Padding(
                       padding: const EdgeInsets.only(right: 12),
@@ -378,7 +180,6 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                           if (selected) {
                             setState(() {
                               _selectedMood = mood;
-                              _isCustomMode = false; // 关键：选中系统表情，退出自定义模式
                             });
                           }
                         },
@@ -386,48 +187,6 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                     );
                   }).toList(),
                 ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // 自定义心情按钮及预览区
-              Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _showCustomEmotionPicker,
-                    icon: const Icon(Icons.emoji_emotions_outlined),
-                    label: const Text('自定义心情'),
-                  ),
-                  // 只有当处于自定义模式 AND 有自定义表情数据时才显示预览
-                  if (_isCustomMode && _customEmoji != null) ...[
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: _customColorValue != null
-                              ? Color(_customColorValue!)
-                              : _selectedMood.color,
-                          child: Text(
-                            _customEmoji!,
-                            style: const TextStyle(fontSize: 18),
-                          ),
-                        ),
-                        if (_customEmojiLabelController.text
-                            .trim()
-                            .isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            _customEmojiLabelController.text.trim(),
-                            style: Theme.of(context).textTheme.bodyMedium,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ],
               ),
 
               const SizedBox(height: 24),
@@ -571,44 +330,19 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                       return;
                     }
 
-                    // 确保基础心情不是默认的 calm
-                    if (_selectedMood == MoodType.calm) {
-                      _selectedMood = MoodType.happy;
-                    }
-
-                    // 确定是否使用自定义模式：必须有自定义表情
-                    final bool shouldUseCustomMode = _isCustomMode && _customEmoji != null;
-
-                    // 保存逻辑：根据是否使用自定义模式决定传递哪些数据
-                    final String? finalCustomEmoji = shouldUseCustomMode
-                        ? _customEmoji
-                        : null;
-                    final int? finalCustomColor = shouldUseCustomMode
-                        ? _customColorValue
-                        : null;
-                    final String? finalCustomLabel =
-                        (shouldUseCustomMode &&
-                            _customEmojiLabelController.text.trim().isNotEmpty)
-                        ? _customEmojiLabelController.text.trim()
-                        : null;
-
                     widget.onSave(
                       _selectedMood,
                       _noteController.text.trim(),
                       isOfflineMode ? false : _aiEnabled,
-                      finalCustomEmoji,
-                      finalCustomColor,
-                      finalCustomLabel,
+                      null,
+                      null,
+                      null,
                       _imageFileNames.isNotEmpty ? _imageFileNames : null,
                     );
                     Navigator.pop(context);
                   },
                   style: ElevatedButton.styleFrom(
-                    // 按钮颜色反馈：自定义模式用自定义色，否则用系统 mood 色
-                    backgroundColor:
-                        (_isCustomMode && _customColorValue != null)
-                        ? Color(_customColorValue!)
-                        : _selectedMood.color,
+                    backgroundColor: _selectedMood.color,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,

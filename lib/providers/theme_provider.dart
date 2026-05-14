@@ -11,6 +11,7 @@ class ThemeProvider with ChangeNotifier {
   bool _nightMode = false;
   bool _followSystem = true; // 默认为跟随系统
   Color? _previousFontColor; // 用于保存关闭夜间模式前的字体颜色
+  String _apiKey = '';
 
   Color get fontColor => _fontColor;
   bool get offlineMode => _offlineMode;
@@ -18,6 +19,7 @@ class ThemeProvider with ChangeNotifier {
   MessageLogRange get messageLogRange => _messageLogRange;
   bool get nightMode => _nightMode;
   bool get followSystem => _followSystem;
+  String get apiKey => _apiKey;
 
   ThemeProvider() {
     _loadFontColor();
@@ -26,6 +28,7 @@ class ThemeProvider with ChangeNotifier {
     _loadMessageLogRange();
     _loadNightMode();
     _loadFollowSystem();
+    _loadApiKey();
   }
 
   Future<void> _loadFontColor() async {
@@ -55,6 +58,12 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _loadApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    _apiKey = prefs.getString('apiKey') ?? '';
+    notifyListeners();
+  }
+
   Future<void> setFontColor(Color color) async {
     _fontColor = color;
     notifyListeners();
@@ -81,6 +90,20 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('offlineMode', value);
+  }
+
+  Future<void> setApiKey(String value) async {
+    _apiKey = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('apiKey', value);
+  }
+
+  Future<void> clearApiKey() async {
+    _apiKey = '';
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('apiKey');
   }
 
   Future<void> _loadNightMode() async {
