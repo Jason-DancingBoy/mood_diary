@@ -201,11 +201,13 @@ class AIService {
   /// [content] 日记内容
   /// [offlineMode] 是否离线模式
   /// [apiKey] 可选的 API Key（优先使用）
+  /// [systemPrompt] 自定义系统提示词，默认为小暖
   static Future<String> getComfort(
     String mood,
     String content, {
     bool offlineMode = false,
     String? apiKey,
+    String? systemPrompt,
   }) async {
     if (offlineMode) {
       return '';
@@ -216,7 +218,7 @@ class AIService {
       final messages = [
         ChatMessage(
           role: MessageRole.system,
-          content: comfortSystemPrompt,
+          content: systemPrompt ?? comfortSystemPrompt,
         ).toMap(),
         ChatMessage(
           role: MessageRole.user,
@@ -251,14 +253,16 @@ class AIService {
   /// [newMessage] 用户新发送的消息
   /// [offlineMode] 是否离线模式
   /// [apiKey] 可选的 API Key（优先使用）
+  /// [systemPrompt] 自定义系统提示词，默认为小暖
   static Future<String> chat(
     List<dynamic> messages,
     String newMessage, {
     bool offlineMode = false,
     String? apiKey,
+    String? systemPrompt,
   }) async {
     if (offlineMode) {
-      return '当前处于离线模式，无法与小暖对话。请检查网络设置。';
+      return '当前处于离线模式，无法与AI助手对话。请检查网络设置。';
     }
 
     try {
@@ -266,7 +270,7 @@ class AIService {
       final List<Map<String, String>> apiMessages = [
         ChatMessage(
           role: MessageRole.system,
-          content: counselorSystemPrompt,
+          content: systemPrompt ?? counselorSystemPrompt,
         ).toMap(),
       ];
 

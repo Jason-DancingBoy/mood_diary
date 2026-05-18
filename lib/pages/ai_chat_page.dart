@@ -1,26 +1,16 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-import '../services/ai_service.dart';
+import '../models/chat_message.dart';
+import '../models/ai_assistant.dart';
 import '../services/ai_chat_manager.dart';
 import '../providers/theme_provider.dart';
+import '../widgets/chat_message_bubble.dart';
 
-const String _chatBoxName = 'ai_chat_history';
 const String _conversationsKey = 'conversations';
 const String _currentConversationKey = 'current_conversation';
-
-const String _welcomeMessage = '''
-你好呀，我是小暖 🌻
-
-很高兴能和你相遇在这里。
-
-无论你此刻心情如何，是开心、焦虑、迷茫还是平静，我都在这里陪伴着你。
-
-有时候，把心里的话说出口，就是疗愈的开始。
-
-今天，有什么想和我聊聊的吗？我会用心倾听每一句话。
-''';
 
 /// 对话记录信息类
 class ConversationInfo {
@@ -60,13 +50,15 @@ class ConversationInfo {
 }
 
 class AIChatPage extends StatefulWidget {
-  const AIChatPage({super.key});
+  final AIAssistant assistant;
+
+  const AIChatPage({super.key, this.assistant = AIAssistant.xiaoNuan});
 
   @override
   State<AIChatPage> createState() => _AIChatPageState();
 }
 
-class _AIChatPageState extends State<AIChatPage> {
+class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
   late Box<List<dynamic>> _chatBox;
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -89,12 +81,7 @@ class _AIChatPageState extends State<AIChatPage> {
     super.initState();
     _initChatBox();
 
-    // 监听输入框内容变化，更新发送按钮状态
-    _controller.addListener(() {
-      setState(() {
-        // 更新按钮状态（将用于透明度和onPressed）
-      });
-    });
+    WidgetsBinding.instance.addObserver(this);
 
     // 监听AIChatManager的状态变化
     _chatManager.addLoadingListener((isLoading) {
@@ -118,8 +105,19 @@ class _AIChatPageState extends State<AIChatPage> {
     });
   }
 
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    final bottomInset = View.of(context).viewInsets.bottom;
+    if (bottomInset > 0) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _scrollToBottom();
+      });
+    }
+  }
+
   Future<void> _initChatBox() async {
-    _chatBox = await Hive.openBox<List<dynamic>>(_chatBoxName);
+    _chatBox = await Hive.openBox<List<dynamic>>(widget.assistant.chatBoxName);
     _loadMessages();
   }
 
@@ -147,7 +145,7 @@ class _AIChatPageState extends State<AIChatPage> {
       _messages.add(
         ChatMessage(
           isUser: false,
-          content: _welcomeMessage,
+          content: widget.assistant.welcomeMessage,
           timestamp: DateTime.now(),
         ),
       );
@@ -258,7 +256,7 @@ class _AIChatPageState extends State<AIChatPage> {
         _messages.add(
           ChatMessage(
             isUser: false,
-            content: _welcomeMessage,
+            content: widget.assistant.welcomeMessage,
             timestamp: DateTime.now(),
           ),
         );
@@ -284,12 +282,12 @@ class _AIChatPageState extends State<AIChatPage> {
 
     // 构建分享文本
     final buffer = StringBuffer();
-    buffer.writeln('🌻 小暖心理咨询对话分享');
+    buffer.writeln('${widget.assistant.emoji} ${widget.assistant.name}对话分享');
     buffer.writeln('═══════════════════');
     buffer.writeln();
 
     for (final msg in selectedMessages) {
-      final sender = msg.isUser ? '我' : '小暖';
+      final sender = msg.isUser ? '我' : widget.assistant.name;
       final timeStr = _formatTimeForShare(msg.timestamp);
       buffer.writeln('[$timeStr] $sender：');
       buffer.writeln(msg.content);
@@ -297,7 +295,7 @@ class _AIChatPageState extends State<AIChatPage> {
     }
 
     buffer.writeln('═══════════════════');
-    buffer.writeln('来自：心情日记·小暖对话');
+    buffer.writeln('来自：心情日记·${widget.assistant.name}对话');
     buffer.writeln();
     buffer.writeln('想和我聊聊吗？打开心情日记 App，一起探索内心~');
 
@@ -347,6 +345,7 @@ class _AIChatPageState extends State<AIChatPage> {
         text,
         offlineMode: themeProvider.offlineMode,
         apiKey: themeProvider.apiKey,
+        systemPrompt: widget.assistant.systemPrompt,
       );
       // 注意：加载状态、响应和错误现在由监听器处理
     } catch (e) {
@@ -355,6 +354,17 @@ class _AIChatPageState extends State<AIChatPage> {
         _showSnackBar('发送失败，请稍后重试');
       }
     }
+  }
+
+  BoxDecoration? _chatBgDecoration(String? chatBgPath) {
+    if (chatBgPath == null || !File(chatBgPath).existsSync()) return null;
+    return BoxDecoration(
+      image: DecorationImage(
+        image: FileImage(File(chatBgPath)),
+        fit: BoxFit.cover,
+        opacity: 0.15,
+      ),
+    );
   }
 
   void _scrollToBottom() {
@@ -449,7 +459,7 @@ class _AIChatPageState extends State<AIChatPage> {
       _messages = [
         ChatMessage(
           isUser: false,
-          content: _welcomeMessage,
+          content: widget.assistant.welcomeMessage,
           timestamp: DateTime.now(),
         ),
       ];
@@ -638,6 +648,8 @@ class _AIChatPageState extends State<AIChatPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
     // 移除监听器
     _chatManager.removeLoadingListener((_) {});
     _chatManager.removeResponseListener((_) {});
@@ -649,13 +661,13 @@ class _AIChatPageState extends State<AIChatPage> {
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
+    _chatBox.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final themeProvider = Provider.of<ThemeProvider>(context);
 
     return Scaffold(
       appBar: _isSelectionMode
@@ -699,17 +711,23 @@ class _AIChatPageState extends State<AIChatPage> {
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: themeProvider.followSystem
-                        ? theme.colorScheme.primary
-                        : theme.brightness == Brightness.dark
-                        ? Colors.orange.shade700
-                        : Colors.orange,
-                    child: const Text('🌻', style: TextStyle(fontSize: 16)),
+                  Selector<ThemeProvider, bool>(
+                    selector: (_, tp) => tp.followSystem,
+                    builder: (context, followSystem, child) {
+                      final assistantColor = widget.assistant.color;
+                      return CircleAvatar(
+                        radius: 16,
+                        backgroundColor: followSystem
+                            ? theme.colorScheme.primary
+                            : theme.brightness == Brightness.dark
+                            ? assistantColor.withValues(alpha: 0.7)
+                            : assistantColor,
+                        child: Text(widget.assistant.emoji, style: const TextStyle(fontSize: 16)),
+                      );
+                    },
                   ),
                   const SizedBox(width: 8),
-                  const Text('小暖'),
+                  Text(widget.assistant.name),
                 ],
               ),
               backgroundColor: theme.colorScheme.inversePrimary,
@@ -727,29 +745,42 @@ class _AIChatPageState extends State<AIChatPage> {
                 ),
               ],
             ),
-      body: Column(
+      body: Selector<ThemeProvider, (String?, Color?, Color?)>(
+        selector: (_, tp) =>
+            (tp.chatBgPath, tp.userBubbleColor, tp.otherBubbleColor),
+        builder: (context, tp, child) {
+          return Column(
         children: [
           // 聊天消息列表
           Expanded(
-            child: ListView.builder(
+            child: Container(
+              decoration: _chatBgDecoration(tp.$1),
+              child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 final isSelected = _selectedIndexes.contains(index);
-                return _MessageBubble(
-                  message: message,
-                  theme: theme,
-                  index: index,
-                  isSelectionMode: _isSelectionMode,
-                  isSelected: isSelected,
-                  onLongPress: () => _enterSelectionMode(index),
-                  onTap: _isSelectionMode
-                      ? () => _toggleSelection(index)
-                      : null,
+                return RepaintBoundary(
+                  child: ChatMessageBubble(
+                    message: message,
+                    theme: theme,
+                    index: index,
+                    isSelectionMode: _isSelectionMode,
+                    isSelected: isSelected,
+                    onLongPress: () => _enterSelectionMode(index),
+                    onTap: _isSelectionMode
+                        ? () => _toggleSelection(index)
+                        : null,
+                    userBubbleColor: tp.$2,
+                    otherBubbleColor: tp.$3,
+                    aiName: widget.assistant.name,
+                    aiEmoji: widget.assistant.emoji,
+                  ),
                 );
               },
+            ),
             ),
           ),
 
@@ -766,7 +797,7 @@ class _AIChatPageState extends State<AIChatPage> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '小暖正在思考...',
+                    '${widget.assistant.name}正在思考...',
                     style: TextStyle(color: theme.colorScheme.primary),
                   ),
                 ],
@@ -819,7 +850,7 @@ class _AIChatPageState extends State<AIChatPage> {
                       controller: _controller,
                       focusNode: _focusNode,
                       decoration: InputDecoration(
-                        hintText: '和小暖说点什么...',
+                        hintText: '和${widget.assistant.name}说点什么...',
                         hintStyle: TextStyle(color: theme.colorScheme.outline),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
@@ -839,221 +870,35 @@ class _AIChatPageState extends State<AIChatPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  FloatingActionButton(
-                    onPressed: (_isLoading || _controller.text.trim().isEmpty)
-                        ? null
-                        : _sendMessage,
-                    mini: true,
-                    backgroundColor: theme.colorScheme.primary.withValues(
-                      alpha: _controller.text.trim().isEmpty ? 0.3 : 0.9,
-                    ),
-                    foregroundColor: Colors.white,
-                    child: Icon(
-                      Icons.send,
-                      color: (_isLoading || _controller.text.trim().isEmpty)
-                          ? theme.disabledColor.withValues(alpha: 0.5)
-                          : Colors.white,
-                    ),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _controller,
+                    builder: (context, value, child) {
+                      final hasContent = value.text.trim().isNotEmpty;
+                      return FloatingActionButton(
+                        onPressed: (_isLoading || !hasContent)
+                            ? null
+                            : _sendMessage,
+                        mini: true,
+                        backgroundColor: theme.colorScheme.primary.withValues(
+                          alpha: hasContent ? 0.9 : 0.3,
+                        ),
+                        foregroundColor: Colors.white,
+                        child: Icon(
+                          Icons.send,
+                          color: (_isLoading || !hasContent)
+                              ? theme.disabledColor.withValues(alpha: 0.5)
+                              : Colors.white,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-/// 聊天消息类
-class ChatMessage {
-  final bool isUser;
-  final String content;
-  final DateTime timestamp;
-
-  ChatMessage({
-    required this.isUser,
-    required this.content,
-    required this.timestamp,
-  });
-
-  factory ChatMessage.fromList(List list) {
-    return ChatMessage(
-      isUser: list[0] as bool,
-      content: list[1] as String,
-      timestamp: DateTime.parse(list[2] as String),
-    );
-  }
-
-  List<dynamic> toList() {
-    return [isUser, content, timestamp.toIso8601String()];
-  }
-}
-
-/// 消息气泡组件
-class _MessageBubble extends StatelessWidget {
-  final ChatMessage message;
-  final ThemeData theme;
-  final int index;
-  final bool isSelectionMode;
-  final bool isSelected;
-  final VoidCallback onLongPress;
-  final VoidCallback? onTap;
-
-  const _MessageBubble({
-    required this.message,
-    required this.theme,
-    required this.index,
-    required this.isSelectionMode,
-    required this.isSelected,
-    required this.onLongPress,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (message.isUser) {
-      // 用户消息 - 右侧
-      return GestureDetector(
-        onLongPress: onLongPress,
-        onTap: onTap,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (isSelectionMode)
-              Checkbox(
-                value: isSelected,
-                onChanged: (_) => onTap?.call(),
-                activeColor: theme.colorScheme.primary,
-              ),
-            Flexible(
-              child: Container(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75,
-                ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary,
-                  borderRadius: BorderRadius.circular(
-                    18,
-                  ).copyWith(bottomRight: const Radius.circular(4)),
-                  border: isSelected
-                      ? Border.all(color: theme.colorScheme.primary, width: 2)
-                      : null,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      message.content,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatTime(message.timestamp),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.white.withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
       );
-    } else {
-      // AI 消息 - 左侧
-      return GestureDetector(
-        onLongPress: onLongPress,
-        onTap: onTap,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (isSelectionMode)
-              Checkbox(
-                value: isSelected,
-                onChanged: (_) => onTap?.call(),
-                activeColor: theme.colorScheme.primary,
-              ),
-            Flexible(
-              child: Container(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75,
-                ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(
-                    18,
-                  ).copyWith(bottomLeft: const Radius.circular(4)),
-                  border: isSelected
-                      ? Border.all(color: theme.colorScheme.primary, width: 2)
-                      : null,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('🌻', style: TextStyle(fontSize: 14)),
-                        const SizedBox(width: 4),
-                        Text(
-                          '小暖',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.primary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      message.content,
-                      style: TextStyle(color: theme.colorScheme.onSurface),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatTime(message.timestamp),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: theme.colorScheme.outline,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-  }
-
-  String _formatTime(DateTime time) {
-    final now = DateTime.now();
-    final diff = now.difference(time);
-
-    if (diff.inMinutes < 1) {
-      return '刚刚';
-    } else if (diff.inHours < 1) {
-      return '${diff.inMinutes}分钟前';
-    } else if (diff.inDays < 1) {
-      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    } else {
-      return '${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    }
+    },
+  ),
+    );
   }
 }
