@@ -4,10 +4,15 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/mood_log.dart';
 import '../services/image_manager.dart';
+import '../services/remote_mood_service.dart';
+import '../services/shared_mood_service.dart';
+import '../services/image_upload_service.dart';
 import '../widgets/log_editor_dialog.dart';
 import '../widgets/mood_log_card.dart';
 import '../enums/mood_type.dart';
 import '../providers/theme_provider.dart';
+import '../providers/auth_provider.dart';
+import '../providers/friend_provider.dart';
 import 'mood_calendar_page.dart';
 import 'mood_details_page.dart';
 
@@ -253,13 +258,15 @@ class _MoodListPageState extends State<MoodListPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final themeProvider = Provider.of<ThemeProvider>(context);
     final appBarColor =
         theme.colorScheme.inversePrimary ?? theme.colorScheme.primary;
     final appBarTextColor =
         theme.colorScheme.onPrimaryContainer ?? Colors.white;
 
-    return Column(
+    return Selector<ThemeProvider, (bool, Color)>(
+      selector: (_, tp) => (tp.followSystem, tp.fontColor),
+      builder: (context, tp, child) {
+        return Column(
       children: [
         // 批量选择模式的 AppBar
         if (_isSelectionMode)
@@ -369,7 +376,7 @@ class _MoodListPageState extends State<MoodListPage> {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: _getCorrectColor(theme, themeProvider),
+                              color: _getCorrectColor(theme, tp.$1, tp.$2),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -377,7 +384,7 @@ class _MoodListPageState extends State<MoodListPage> {
                             todaySummary,
                             style: TextStyle(
                               fontSize: 14,
-                              color: _getCorrectColor(theme, themeProvider).withValues(
+                              color: _getCorrectColor(theme, tp.$1, tp.$2).withValues(
                                 alpha: 0.8,
                               ),
                             ),
@@ -406,7 +413,7 @@ class _MoodListPageState extends State<MoodListPage> {
                             Text(
                               '暂无心情记录，快去写一条吧~',
                               style: TextStyle(
-                                color: _getCorrectColor(theme, themeProvider),
+                                color: _getCorrectColor(theme, tp.$1, tp.$2),
                               ),
                             ),
                           ],
@@ -416,8 +423,8 @@ class _MoodListPageState extends State<MoodListPage> {
                   else ...[
                     // 心情记录列表
                     _isSelectionMode
-                        ? _buildSelectionModeList(logs, theme, themeProvider)
-                        : _buildNormalModeList(logs, theme, themeProvider),
+                        ? _buildSelectionModeList(logs, theme, tp.$1, tp.$2)
+                        : _buildNormalModeList(logs, theme, tp.$1, tp.$2),
                     // 底部间距，防止 FAB 遮挡
                     const SliverToBoxAdapter(
                       child: SizedBox(height: 80),
@@ -459,21 +466,23 @@ class _MoodListPageState extends State<MoodListPage> {
           ),
       ],
     );
+    },
+  );
   }
 
   /// 获取正确的文字颜色
-  Color _getCorrectColor(ThemeData theme, ThemeProvider themeProvider) {
-    if (themeProvider.followSystem) {
+  Color _getCorrectColor(ThemeData theme, bool followSystem, Color fontColor) {
+    if (followSystem) {
       // 使用系统主题的文字颜色
       return theme.colorScheme.onSurface;
     } else {
       // 使用自定义的字体颜色
-      return themeProvider.fontColor;
+      return fontColor;
     }
   }
 
   /// 构建批量选择模式的列表
-  Widget _buildSelectionModeList(List<MoodLog> logs, ThemeData theme, ThemeProvider themeProvider) {
+  Widget _buildSelectionModeList(List<MoodLog> logs, ThemeData theme, bool followSystem, Color fontColor) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
@@ -491,7 +500,7 @@ class _MoodListPageState extends State<MoodListPage> {
                   log.note,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: _getCorrectColor(theme, themeProvider)),
+                  style: TextStyle(color: _getCorrectColor(theme, followSystem, fontColor)),
                 ),
                 subtitle: Text(
                   log.displayLabel,
@@ -516,7 +525,7 @@ class _MoodListPageState extends State<MoodListPage> {
   }
 
   /// 构建正常模式的列表（滑动删除）
-  Widget _buildNormalModeList(List<MoodLog> logs, ThemeData theme, ThemeProvider themeProvider) {
+  Widget _buildNormalModeList(List<MoodLog> logs, ThemeData theme, bool followSystem, Color fontColor) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
@@ -571,6 +580,15 @@ class _MoodListPageState extends State<MoodListPage> {
                   ),
                 ),
                 theme: theme,
+                onTogglePrivacy: () {
+                  final map = _box.get(log.id);
+                  if (map != null) {
+                    final current = map['isPrivate'] as bool? ?? false;
+                    map['isPrivate'] = !current;
+                    _box.put(log.id, map);
+                    _loadLogs();
+                  }
+                },
               ),
             ),
           );
@@ -581,36 +599,165 @@ class _MoodListPageState extends State<MoodListPage> {
   }
 
   void _showAddLogDialog(BuildContext context) async {
-    // 直接显示编辑器，图片选择功能已在编辑器内部实现
-    if (context.mounted) {
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        enableDrag: true,
-        barrierColor: Colors.black.withValues(alpha: 0.3),
-        backgroundColor: Colors.transparent,
-        builder: (context) => LogEditorDialog(
-          initialLog: null,
-          onSave:
-              (
-                mood,
-                note,
-                aiEnabled,
-                customEmoji,
-                customColorValue,
-                customEmojiLabel,
-                imageFileNames,
-              ) =>
-                  _addLog(
-                mood,
-                note,
-                aiEnabled,
+    if (!context.mounted) return;
+
+    final shareData = await showModalBottomSheet<Map<String, dynamic>?>(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: true,
+      barrierColor: Colors.black.withValues(alpha: 0.3),
+      backgroundColor: Colors.transparent,
+      builder: (context) => LogEditorDialog(
+        initialLog: null,
+        onSave: (mood, note, aiEnabled, customEmoji, customColorValue,
+            customEmojiLabel, imageFileNames) =>
+            _addLog(mood, note, aiEnabled,
                 imageFileNames: imageFileNames,
                 customEmoji: customEmoji,
                 customColorValue: customColorValue,
-                customEmojiLabel: customEmojiLabel,
-              ),
+                customEmojiLabel: customEmojiLabel),
+      ),
+    );
+
+    if (shareData == null || !context.mounted) return;
+
+    // 检查是否已登录
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.isLoggedIn || !context.mounted) return;
+
+    final moodType = shareData['mood'] as MoodType;
+    final note = shareData['note'] as String;
+    final imageFileNames = shareData['imageFileNames'] as List<String>?;
+
+    final id = DateTime.now().millisecondsSinceEpoch.toString();
+    final newLog = MoodLog(
+      id: id,
+      mood: moodType,
+      note: note,
+      imageFileNames: imageFileNames,
+      createdAt: DateTime.now(),
+      aiEnabled: shareData['aiEnabled'] as bool,
+    );
+
+    // 检查是否有好友
+    final friendProvider = context.read<FriendProvider>();
+    await friendProvider.loadFriends();
+    if (!context.mounted) return;
+
+    if (friendProvider.friends.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('还没有好友，请先去"我的"页面添加好友'),
         ),
+      );
+      return;
+    }
+
+    _showShareFriendPicker(context, newLog);
+  }
+
+  Future<void> _showShareFriendPicker(
+      BuildContext context, MoodLog log) async {
+    final friendProvider = context.read<FriendProvider>();
+    await friendProvider.loadFriends();
+
+    if (!context.mounted) return;
+
+    final friends = friendProvider.friends;
+    if (friends.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('还没有好友，请先添加好友')),
+      );
+      return;
+    }
+
+    final selectedFriend = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('选择分享给哪位好友',
+                  style: theme.textTheme.titleMedium),
+              const SizedBox(height: 16),
+              ...friends.map((friend) => ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor:
+                          theme.colorScheme.primaryContainer,
+                      child: Text(
+                        friend.nickname.isNotEmpty
+                            ? friend.nickname[0].toUpperCase()
+                            : '?',
+                        style: TextStyle(
+                            color: theme
+                                .colorScheme.onPrimaryContainer),
+                      ),
+                    ),
+                    title: Text(friend.nickname),
+                    onTap: () => Navigator.pop(ctx, friend.userId),
+                  )),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedFriend == null || !context.mounted) return;
+
+    // Show loading
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('正在分享...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final moodRecord = await RemoteMoodService.uploadMood(log);
+      final moodId = moodRecord.id;
+
+      List<String> imageUrls = [];
+      if (log.imageFileNames != null && log.imageFileNames!.isNotEmpty) {
+        imageUrls =
+            await ImageUploadService.uploadImages(log.imageFileNames!);
+        if (imageUrls.isNotEmpty) {
+          await RemoteMoodService.updateMoodUrls(moodId, imageUrls);
+        }
+      }
+
+      await SharedMoodService.shareMood(selectedFriend, moodId);
+
+      if (!context.mounted) return;
+      Navigator.of(context).pop(); // dismiss loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已分享给好友')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.of(context).pop(); // dismiss loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('分享失败: $e')),
       );
     }
   }

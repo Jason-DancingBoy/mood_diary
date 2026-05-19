@@ -13,6 +13,7 @@ class MoodLog {
   final DateTime createdAt;
   final String? aiComfort;
   final bool aiEnabled;
+  final bool isPrivate;
 
   // 兼容旧版本：获取第一张图片
   String? get imageFileName => imageFileNames?.isNotEmpty == true ? imageFileNames!.first : null;
@@ -31,6 +32,7 @@ class MoodLog {
     required this.createdAt,
     this.aiComfort,
     this.aiEnabled = true,
+    this.isPrivate = false,
   });
 
   factory MoodLog.fromMap(Map<dynamic, dynamic> map, String key) {
@@ -58,6 +60,7 @@ class MoodLog {
       createdAt: (map['createdAt'] as DateTime).toLocal(),
       aiComfort: map['aiComfort'] as String?,
       aiEnabled: (map['aiEnabled'] as bool?) ?? true,
+      isPrivate: (map['isPrivate'] as bool?) ?? false,
     );
   }
 
@@ -73,6 +76,7 @@ class MoodLog {
       'createdAt': createdAt.toUtc(),
       if (aiComfort != null) 'aiComfort': aiComfort,
       'aiEnabled': aiEnabled,
+      'isPrivate': isPrivate,
     };
   }
 

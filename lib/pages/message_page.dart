@@ -3,10 +3,14 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import '../enums/message_frequency.dart';
 import '../enums/message_log_range.dart';
+import '../enums/mood_type.dart';
 import '../models/mood_log.dart';
+import '../models/shared_mood.dart';
+import '../providers/shared_mood_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/message_service.dart';
 import '../services/message_scheduler.dart';
+import 'shared_mood_detail_page.dart';
 
 const String _moodLogBox = 'mood_logs_box';
 const String _messageBoxName = 'mail_messages_box';
@@ -65,44 +69,75 @@ class MessagePage extends StatefulWidget {
   State<MessagePage> createState() => _MessagePageState();
 }
 
-class _MessagePageState extends State<MessagePage> {
-  late Box<Map<dynamic, dynamic>> _logBox;
-  late Box<Map<dynamic, dynamic>> _mailBox;
+class _MessagePageState extends State<MessagePage>
+    with SingleTickerProviderStateMixin {
+  Box<Map<dynamic, dynamic>>? _logBox;
+  Box<Map<dynamic, dynamic>>? _mailBox;
+  late TabController _tabController;
   List<MailMessage> _messages = [];
+  bool _isBoxReady = false;
   bool _isLoading = true;
+  bool _hasError = false;
   int _unreadCount = 0;
   bool _isSelectionMode = false;
   final Set<String> _selectedMessages = {};
 
+  // Friend shares state
+  String? _filterSenderId;
+  bool _isFriendSelectionMode = false;
+  final Set<String> _selectedFriendShareIds = {};
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _ensureBoxesOpen();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SharedMoodProvider>().loadReceived();
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _ensureBoxesOpen() async {
-    if (!Hive.isBoxOpen(_moodLogBox)) {
-      _logBox = await Hive.openBox<Map<dynamic, dynamic>>(_moodLogBox);
-    } else {
-      _logBox = Hive.box<Map<dynamic, dynamic>>(_moodLogBox);
-    }
+    try {
+      if (!Hive.isBoxOpen(_moodLogBox)) {
+        _logBox = await Hive.openBox<Map<dynamic, dynamic>>(_moodLogBox);
+      } else {
+        _logBox = Hive.box<Map<dynamic, dynamic>>(_moodLogBox);
+      }
 
-    if (!Hive.isBoxOpen(_messageBoxName)) {
-      _mailBox = await Hive.openBox<Map<dynamic, dynamic>>(_messageBoxName);
-    } else {
-      _mailBox = Hive.box<Map<dynamic, dynamic>>(_messageBoxName);
-    }
+      if (!Hive.isBoxOpen(_messageBoxName)) {
+        _mailBox = await Hive.openBox<Map<dynamic, dynamic>>(_messageBoxName);
+      } else {
+        _mailBox = Hive.box<Map<dynamic, dynamic>>(_messageBoxName);
+      }
 
-    await _loadMessages();
-    await _checkAndGenerateMessage();
+      _isBoxReady = true;
+      await _loadMessages();
+      await _checkAndGenerateMessage();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadMessages() async {
+    final mailBox = _mailBox;
+    if (mailBox == null) return;
     final List<MailMessage> messages = [];
-    for (final key in _mailBox.keys) {
+    for (final key in mailBox.keys) {
       // 跳过元数据键
       if (key == _messageLastSentAtKey || key == _messageCountKey) continue;
-      final map = _mailBox.get(key);
+      final map = mailBox.get(key);
       if (map != null) {
         try {
           messages.add(MailMessage.fromMap(map));
@@ -122,14 +157,16 @@ class _MessagePageState extends State<MessagePage> {
   }
 
   Future<void> _checkAndGenerateMessage() async {
+    final mailBox = _mailBox;
+    if (mailBox == null) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final frequency = themeProvider.messageFrequency;
 
     if (frequency == MessageFrequency.never) return;
 
-    final lastSentAtStr = _mailBox.get(_messageLastSentAtKey)?['value'] as String?;
+    final lastSentAtStr = mailBox.get(_messageLastSentAtKey)?['value'] as String?;
     final lastSentAt = lastSentAtStr != null ? DateTime.parse(lastSentAtStr) : null;
-    final countToday = (_mailBox.get(_messageCountKey)?['value'] as int?) ?? 0;
+    final countToday = (mailBox.get(_messageCountKey)?['value'] as int?) ?? 0;
     final now = DateTime.now();
 
     bool shouldGenerate = false;
@@ -161,6 +198,8 @@ class _MessagePageState extends State<MessagePage> {
   }
 
   Future<void> _generateAndSaveMessage(DateTime now, MessageLogRange range) async {
+    final mailBox = _mailBox;
+    if (mailBox == null) return;
     final logs = _loadRecentLogs();
     final content = MessageService.generateDailyMessage(logs, range);
 
@@ -184,32 +223,34 @@ class _MessagePageState extends State<MessagePage> {
       isRead: false,
     );
 
-    await _mailBox.put(mail.id, mail.toMap());
-    await _mailBox.put(_messageLastSentAtKey, {'value': now.toIso8601String()});
+    await mailBox.put(mail.id, mail.toMap());
+    await mailBox.put(_messageLastSentAtKey, {'value': now.toIso8601String()});
 
-    final countToday = (_mailBox.get(_messageCountKey)?['value'] as int?) ?? 0;
-    final lastSentAt = _mailBox.get(_messageLastSentAtKey)?['value'] as String?;
+    final countToday = (mailBox.get(_messageCountKey)?['value'] as int?) ?? 0;
+    final lastSentAt = mailBox.get(_messageLastSentAtKey)?['value'] as String?;
     if (lastSentAt != null && _sameDay(now, DateTime.parse(lastSentAt))) {
-      await _mailBox.put(_messageCountKey, {'value': countToday + 1});
+      await mailBox.put(_messageCountKey, {'value': countToday + 1});
     } else {
-      await _mailBox.put(_messageCountKey, {'value': 1});
+      await mailBox.put(_messageCountKey, {'value': 1});
     }
 
     await _loadMessages();
   }
 
   List<MoodLog> _loadRecentLogs() {
-    final keys = _logBox.keys.toList();
+    final logBox = _logBox;
+    if (logBox == null) return [];
+    final keys = logBox.keys.toList();
     keys.sort((a, b) {
-      final mapA = _logBox.get(a)!;
-      final mapB = _logBox.get(b)!;
+      final mapA = logBox.get(a)!;
+      final mapB = logBox.get(b)!;
       final timeA = mapA['createdAt'] as DateTime;
       final timeB = mapB['createdAt'] as DateTime;
       return timeB.compareTo(timeA);
     });
 
     return keys
-        .map((key) => MoodLog.fromMap(_logBox.get(key)!, key as String))
+        .map((key) => MoodLog.fromMap(logBox.get(key)!, key as String))
         .toList();
   }
 
@@ -218,12 +259,101 @@ class _MessagePageState extends State<MessagePage> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
+  // ---- Friend share methods ----
+
+  List<MapEntry<String, String>> _getUniqueSenders(List<SharedMood> shares) {
+    final seen = <String>{};
+    final result = <MapEntry<String, String>>[];
+    for (final s in shares) {
+      if (seen.add(s.fromUserId)) {
+        result.add(MapEntry(s.fromUserId, s.fromUserNickname));
+      }
+    }
+    return result;
+  }
+
+  void _enterFriendSelectionMode() {
+    setState(() {
+      _isFriendSelectionMode = true;
+      _selectedFriendShareIds.clear();
+    });
+  }
+
+  void _exitFriendSelectionMode() {
+    setState(() {
+      _isFriendSelectionMode = false;
+      _selectedFriendShareIds.clear();
+    });
+  }
+
+  void _toggleFriendShareSelection(String id) {
+    setState(() {
+      if (_selectedFriendShareIds.contains(id)) {
+        _selectedFriendShareIds.remove(id);
+        if (_selectedFriendShareIds.isEmpty) {
+          _isFriendSelectionMode = false;
+        }
+      } else {
+        _selectedFriendShareIds.add(id);
+      }
+    });
+  }
+
+  Future<void> _deleteSelectedFriendShares() async {
+    if (_selectedFriendShareIds.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除选中的 ${_selectedFriendShareIds.length} 条分享吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      final provider = context.read<SharedMoodProvider>();
+      for (final id in _selectedFriendShareIds) {
+        provider.deleteShare(id);
+      }
+      _exitFriendSelectionMode();
+    }
+  }
+
+  String _formatFriendTime(DateTime time) {
+    final now = DateTime.now();
+    final diff = now.difference(time);
+    if (diff.inMinutes < 1) return '刚刚';
+    if (diff.inHours < 1) return '${diff.inMinutes}分钟前';
+    if (diff.inDays < 1) return '${diff.inHours}小时前';
+    if (diff.inDays < 7) return '${diff.inDays}天前';
+    return '${time.month}/${time.day}';
+  }
+
+  static MoodType _moodTypeFromName(String name) {
+    return MoodType.values.firstWhere(
+      (e) => e.name == name,
+      orElse: () => MoodType.calm,
+    );
+  }
+
+  // ---- End friend share methods ----
+
   Future<void> _markAsRead(String messageId) async {
-    final map = _mailBox.get(messageId);
+    final mailBox = _mailBox;
+    if (mailBox == null) return;
+    final map = mailBox.get(messageId);
     if (map != null) {
       final mail = MailMessage.fromMap(map);
       if (!mail.isRead) {
-        await _mailBox.put(messageId, mail.copyWith(isRead: true).toMap());
+        await mailBox.put(messageId, mail.copyWith(isRead: true).toMap());
         await _loadMessages();
       }
     }
@@ -283,8 +413,10 @@ class _MessagePageState extends State<MessagePage> {
     );
 
     if (confirmed == true) {
+      final mailBox = _mailBox;
+      if (mailBox == null) return;
       for (final id in _selectedMessages) {
-        await _mailBox.delete(id);
+        await mailBox.delete(id);
       }
       setState(() {
         _selectedMessages.clear();
@@ -344,135 +476,430 @@ class _MessagePageState extends State<MessagePage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  // ---- Friend share UI builders ----
 
-    return Scaffold(
-      appBar: AppBar(
-        title: _isSelectionMode
-            ? Text('已选择 ${_selectedMessages.length} 项')
-            : Row(
+  Widget _buildSenderFilter(List<SharedMood> shares) {
+    final senders = _getUniqueSenders(shares);
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilterChip(
+              label: const Text('全部'),
+              selected: _filterSenderId == null,
+              onSelected: (_) => setState(() => _filterSenderId = null),
+            ),
+          ),
+          ...senders.map((entry) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilterChip(
+                  label: Text(entry.value),
+                  selected: _filterSenderId == entry.key,
+                  onSelected: (_) =>
+                      setState(() => _filterSenderId = entry.key),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFriendShareItem(SharedMood share) {
+    final unread = share.readAt == null;
+    final theme = Theme.of(context);
+    final moodType = share.mood != null
+        ? _moodTypeFromName(share.mood!.moodType)
+        : MoodType.calm;
+
+    return InkWell(
+      onTap: () {
+        if (_isFriendSelectionMode) {
+          _toggleFriendShareSelection(share.id);
+        } else {
+          if (unread) {
+            context.read<SharedMoodProvider>().markAsRead(share.id);
+          }
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => SharedMoodDetailPage(sharedMood: share)));
+        }
+      },
+      onLongPress: () {
+        if (!_isFriendSelectionMode) {
+          _enterFriendSelectionMode();
+          _selectedFriendShareIds.add(share.id);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+                color: theme.colorScheme.outline.withValues(alpha: 0.2)),
+          ),
+          color: unread
+              ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
+              : null,
+        ),
+        child: Row(
+          children: [
+            if (_isFriendSelectionMode)
+              Checkbox(
+                value: _selectedFriendShareIds.contains(share.id),
+                onChanged: (_) => _toggleFriendShareSelection(share.id),
+              )
+            else if (unread)
+              Container(
+                margin: const EdgeInsets.only(right: 8),
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                    color: Colors.red, shape: BoxShape.circle),
+              ),
+            CircleAvatar(
+              backgroundColor: moodType.color,
+              child: Icon(moodType.icon, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.mail_outline, size: 24),
-                  const SizedBox(width: 8),
-                  const Text('收件箱'),
-                  if (_unreadCount > 0) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          share.fromUserNickname,
+                          style: TextStyle(
+                            fontWeight:
+                                unread ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 16,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      child: Text(
-                        '$_unreadCount',
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatFriendTime(share.sharedAt),
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.outline),
                       ),
+                    ],
+                  ),
+                  if (share.mood?.note != null &&
+                      share.mood!.note.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      share.mood!.note,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: unread
+                            ? theme.colorScheme.onSurface
+                            : theme.colorScheme.outline,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ],
               ),
-        backgroundColor: theme.colorScheme.inversePrimary,
-        foregroundColor: theme.colorScheme.onPrimaryContainer,
-        leading: _isSelectionMode
-            ? IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: _toggleSelectionMode,
-              )
-            : null,
-        actions: [
-          if (_isSelectionMode) ...[
-            IconButton(
-              icon: Icon(
-                _selectedMessages.length == _messages.length
-                    ? Icons.deselect
-                    : Icons.select_all,
-              ),
-              tooltip: '全选',
-              onPressed: _toggleSelectAll,
             ),
-            IconButton(
-              icon: const Icon(Icons.delete),
-              tooltip: '删除',
-              onPressed: _selectedMessages.isEmpty ? null : _deleteSelectedMessages,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFriendSharesSection() {
+    return Consumer<SharedMoodProvider>(
+      builder: (context, provider, _) {
+        if (provider.isLoading && provider.receivedShares.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (provider.receivedShares.isEmpty) {
+          final theme = Theme.of(context);
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.inbox_outlined,
+                    size: 64,
+                    color: theme.colorScheme.outline.withValues(alpha: 0.5)),
+                const SizedBox(height: 16),
+                Text('暂无收到的心情分享',
+                    style: theme.textTheme.bodyLarge
+                        ?.copyWith(color: theme.colorScheme.outline)),
+              ],
             ),
-          ] else ...[
-            Consumer<ThemeProvider>(
-              builder: (context, themeProvider, _) => IconButton(
-                icon: const Icon(Icons.settings),
-                tooltip: '设置',
-                onPressed: () => _showFrequencyPicker(context, themeProvider),
+          );
+        }
+
+        final shares = _filterSenderId == null
+            ? provider.receivedShares
+            : provider.receivedShares
+                .where((s) => s.fromUserId == _filterSenderId)
+                .toList();
+
+        return Column(
+          children: [
+            _buildSenderFilter(provider.receivedShares),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: () => provider.loadReceived(),
+                child: shares.isEmpty
+                    ? ListView(children: [
+                        SizedBox(
+                          height: 120,
+                          child: Center(
+                            child: Text('该好友暂无分享',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .outline)),
+                          ),
+                        ),
+                      ])
+                    : ListView.builder(
+                        itemCount: shares.length,
+                        itemBuilder: (_, i) =>
+                            _buildFriendShareItem(shares[i]),
+                      ),
               ),
             ),
           ],
-        ],
-      ),
-      body: ValueListenableBuilder<Box<Map<dynamic, dynamic>>>(
-        valueListenable: _mailBox.listenable(),
-        builder: (context, box, _) {
-          if (_isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        );
+      },
+    );
+  }
 
-          if (_messages.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+  Widget _buildAiMessagesSection() {
+    if (_hasError) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline,
+                size: 64,
+                color: Theme.of(context).colorScheme.error),
+            const SizedBox(height: 16),
+            Text('加载失败，请重试',
+                style: Theme.of(context).textTheme.bodyLarge),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _hasError = false;
+                  _isLoading = true;
+                });
+                _ensureBoxesOpen();
+              },
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (!_isBoxReady || _mailBox == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<Box<Map<dynamic, dynamic>>>(
+      valueListenable: _mailBox!.listenable(),
+      builder: (context, box, _) {
+        if (_isLoading) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (_messages.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.inbox_outlined,
+                  size: 80,
+                  color: theme.colorScheme.outline.withValues(alpha: 0.5),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '收件箱为空',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '小暖会根据你的心情记录\n给你发送温暖的邮件',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.outline.withValues(alpha: 0.7),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: _messages.length,
+          itemBuilder: (context, index) {
+            final mail = _messages[index];
+            return _MailListItem(
+              mail: mail,
+              isSelectionMode: _isSelectionMode,
+              isSelected: _selectedMessages.contains(mail.id),
+              onTap: () {
+                if (_isSelectionMode) {
+                  _toggleMessageSelection(mail.id);
+                } else {
+                  _showMessageDetail(context, mail);
+                }
+              },
+              onLongPress: () {
+                if (!_isSelectionMode) {
+                  setState(() {
+                    _isSelectionMode = true;
+                    _selectedMessages.add(mail.id);
+                  });
+                }
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ---- End UI builders ----
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sharedProvider = context.watch<SharedMoodProvider>();
+    final isAnySelection =
+        (_tabController.index == 0 && _isFriendSelectionMode) ||
+            (_tabController.index == 1 && _isSelectionMode);
+    final selectedCount = _tabController.index == 0
+        ? _selectedFriendShareIds.length
+        : _selectedMessages.length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: isAnySelection
+            ? Text('已选择 $selectedCount 项')
+            : const Row(
                 children: [
-                  Icon(
-                    Icons.inbox_outlined,
-                    size: 80,
-                    color: theme.colorScheme.outline.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '收件箱为空',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.outline,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '小暖会根据你的心情记录\n给你发送温暖的邮件',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.outline.withValues(alpha: 0.7),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                  Icon(Icons.mail_outline, size: 24),
+                  SizedBox(width: 8),
+                  Text('收件箱'),
                 ],
               ),
-            );
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: _messages.length,
-            itemBuilder: (context, index) {
-              final mail = _messages[index];
-              return _MailListItem(
-                mail: mail,
-                isSelectionMode: _isSelectionMode,
-                isSelected: _selectedMessages.contains(mail.id),
-                onTap: () {
-                  if (_isSelectionMode) {
-                    _toggleMessageSelection(mail.id);
+        backgroundColor: theme.colorScheme.inversePrimary,
+        foregroundColor: theme.colorScheme.onPrimaryContainer,
+        leading: isAnySelection
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  if (_tabController.index == 0) {
+                    _exitFriendSelectionMode();
                   } else {
-                    _showMessageDetail(context, mail);
+                    _toggleSelectionMode();
                   }
                 },
-                onLongPress: () {
-                  if (!_isSelectionMode) {
-                    setState(() {
-                      _isSelectionMode = true;
-                      _selectedMessages.add(mail.id);
-                    });
-                  }
-                },
-              );
-            },
-          );
-        },
+              )
+            : null,
+        actions: [
+          if (_tabController.index == 0) ...[
+            if (_isFriendSelectionMode)
+              IconButton(
+                icon: const Icon(Icons.delete),
+                tooltip: '删除',
+                onPressed: _selectedFriendShareIds.isEmpty
+                    ? null
+                    : _deleteSelectedFriendShares,
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.checklist),
+                tooltip: '批量选择',
+                onPressed: _enterFriendSelectionMode,
+              ),
+          ] else ...[
+            if (_isSelectionMode) ...[
+              IconButton(
+                icon: Icon(
+                  _selectedMessages.length == _messages.length
+                      ? Icons.deselect
+                      : Icons.select_all,
+                ),
+                tooltip: '全选/取消全选',
+                onPressed: _toggleSelectAll,
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete),
+                tooltip: '删除',
+                onPressed:
+                    _selectedMessages.isEmpty ? null : _deleteSelectedMessages,
+              ),
+            ] else ...[
+              Consumer<ThemeProvider>(
+                builder: (context, tp, _) => IconButton(
+                  icon: const Icon(Icons.settings),
+                  tooltip: '设置消息频率',
+                  onPressed: () => _showFrequencyPicker(context, tp),
+                ),
+              ),
+            ],
+          ],
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: [
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('好友分享'),
+                  if (sharedProvider.unreadCount > 0) ...[
+                    const SizedBox(width: 4),
+                    Badge(label: Text('${sharedProvider.unreadCount}')),
+                  ],
+                ],
+              ),
+            ),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('小暖消息'),
+                  if (_unreadCount > 0) ...[
+                    const SizedBox(width: 4),
+                    Badge(label: Text('$_unreadCount')),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildFriendSharesSection(),
+          _buildAiMessagesSection(),
+        ],
       ),
     );
   }

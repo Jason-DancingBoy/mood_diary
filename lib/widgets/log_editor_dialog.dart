@@ -62,7 +62,12 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
   Future<void> _pickImages() async {
     final picker = ImagePicker();
     // 允许选择多张图片，最多9张
-    final pickedFiles = await picker.pickMultiImage(limit: 9 - _imageFileNames.length);
+    final pickedFiles = await picker.pickMultiImage(
+      limit: 9 - _imageFileNames.length,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 80,
+    );
     if (pickedFiles.isNotEmpty) {
       final newFileNames = <String>[];
       final newPaths = <String>[];
@@ -330,16 +335,20 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                       return;
                     }
 
-                    widget.onSave(
-                      _selectedMood,
-                      _noteController.text.trim(),
-                      isOfflineMode ? false : _aiEnabled,
-                      null,
-                      null,
-                      null,
-                      _imageFileNames.isNotEmpty ? _imageFileNames : null,
-                    );
-                    Navigator.pop(context);
+                    final mood = _selectedMood;
+                    final note = _noteController.text.trim();
+                    final ai = isOfflineMode ? false : _aiEnabled;
+                    final images =
+                        _imageFileNames.isNotEmpty ? _imageFileNames : null;
+
+                    widget.onSave(mood, note, ai, null, null, null, images);
+                    // 非编辑模式下，返回心情数据供调用方自动分享
+                    Navigator.pop(context, isEdit ? null : {
+                      'mood': mood,
+                      'note': note,
+                      'aiEnabled': ai,
+                      'imageFileNames': images,
+                    });
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _selectedMood.color,

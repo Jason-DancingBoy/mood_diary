@@ -9,9 +9,15 @@ import 'package:share_plus/share_plus.dart';
 import '../models/mood_log.dart';
 import '../services/image_manager.dart';
 import '../services/ai_service.dart';
+import '../services/remote_mood_service.dart';
+import '../services/shared_mood_service.dart';
+import '../services/image_upload_service.dart';
 import '../widgets/log_editor_dialog.dart';
+import '../utils/page_transitions.dart';
 import '../enums/mood_type.dart';
 import '../providers/theme_provider.dart';
+import '../providers/auth_provider.dart';
+import '../providers/friend_provider.dart';
 import 'full_screen_image_view.dart';
 
 class MoodDetailPage extends StatefulWidget {
@@ -264,7 +270,12 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
       return;
     }
     
-    final pickedFiles = await picker.pickMultiImage(limit: maxAdd);
+    final pickedFiles = await picker.pickMultiImage(
+      limit: maxAdd,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 80,
+    );
     if (pickedFiles.isEmpty) return;
 
     try {
@@ -349,7 +360,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
 
     Navigator.push(
       context,
-      MaterialPageRoute(
+      FadeScalePageRoute(
         builder: (context) => FullScreenImageView(
           imagePath: imagePath,
           imageFileNames: _currentLog.imageFileNames,
@@ -359,25 +370,140 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
     );
   }
 
+  Future<void> _shareToFriend() async {
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.isLoggedIn) return;
+
+    final friendProvider = context.read<FriendProvider>();
+    await friendProvider.loadFriends();
+
+    if (!mounted) return;
+
+    final friends = friendProvider.friends;
+    if (friends.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('还没有好友，请先添加好友')),
+      );
+      return;
+    }
+
+    final selectedFriend = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '选择分享给哪位好友',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 16),
+              ...friends.map((friend) => ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor:
+                          theme.colorScheme.primaryContainer,
+                      child: Text(
+                        friend.nickname.isNotEmpty
+                            ? friend.nickname[0].toUpperCase()
+                            : '?',
+                        style: TextStyle(
+                          color:
+                              theme.colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                    title: Text(friend.nickname),
+                    onTap: () => Navigator.pop(ctx, friend.userId),
+                  )),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedFriend == null || !mounted) return;
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('正在分享...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // 1. Upload mood to remote
+      final moodRecord =
+          await RemoteMoodService.uploadMood(_currentLog);
+      final moodId = moodRecord.id;
+
+      // 2. Upload images if any
+      List<String> imageUrls = [];
+      if (_currentLog.imageFileNames != null &&
+          _currentLog.imageFileNames!.isNotEmpty) {
+        imageUrls = await ImageUploadService.uploadImages(
+            _currentLog.imageFileNames!);
+        if (imageUrls.isNotEmpty) {
+          await RemoteMoodService.updateMoodUrls(moodId, imageUrls);
+        }
+      }
+
+      // 3. Create share record
+      await SharedMoodService.shareMood(selectedFriend, moodId);
+
+      if (!mounted) return;
+      Navigator.of(context).pop(); // dismiss loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已分享给好友')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // dismiss loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('分享失败: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final themeProvider = Provider.of<ThemeProvider>(context);
     final appBarColor =
         theme.colorScheme.inversePrimary ?? theme.colorScheme.primary;
     final appBarTextColor =
         theme.colorScheme.onPrimaryContainer ?? Colors.white;
 
-    // 获取正确的文字颜色（本地函数）
-    Color getCorrectColor() {
-      if (themeProvider.followSystem) {
-        // 使用系统主题的文字颜色
-        return theme.colorScheme.onSurface;
-      } else {
-        // 使用自定义的字体颜色
-        return themeProvider.fontColor;
-      }
-    }
+    return Selector<ThemeProvider, (bool, Color, bool)>(
+      selector: (_, tp) => (tp.followSystem, tp.fontColor, tp.offlineMode),
+      builder: (context, tp, child) {
+        // 获取正确的文字颜色（本地函数）
+        Color getCorrectColor() {
+          if (tp.$1) {
+            return theme.colorScheme.onSurface;
+          } else {
+            return tp.$2;
+          }
+        }
 
     return Scaffold(
       appBar: AppBar(
@@ -385,6 +511,18 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
         backgroundColor: appBarColor,
         foregroundColor: appBarTextColor,
         actions: [
+          Consumer<AuthProvider>(
+            builder: (context, authProvider, child) {
+              if (authProvider.isLoggedIn) {
+                return IconButton(
+                  icon: const Icon(Icons.person_add_alt),
+                  onPressed: _shareToFriend,
+                  tooltip: '分享给好友',
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.share),
             onPressed: _shareMoodCard,
@@ -475,66 +613,62 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
               if (_currentLog.imageFileNames != null && _currentLog.imageFileNames!.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 // 多图片网格显示
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: _currentLog.imageFileNames!.length,
-                  itemBuilder: (context, index) {
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        InkWell(
-                          onTap: () => _viewFullImage(index),
-                          borderRadius: BorderRadius.circular(8),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: FutureBuilder<String>(
-                              future: ImageManager.getImagePathAsync(
-                                _currentLog.imageFileNames![index],
-                              ),
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState == ConnectionState.done &&
-                                    snapshot.hasData &&
-                                    File(snapshot.data!).existsSync()) {
-                                  return Image.file(
-                                    File(snapshot.data!),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final itemWidth = (constraints.maxWidth - 16) / 3;
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: List.generate(
+                        _currentLog.imageFileNames!.length,
+                        (index) => SizedBox(
+                          width: itemWidth,
+                          height: itemWidth,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              InkWell(
+                                onTap: () => _viewFullImage(index),
+                                borderRadius: BorderRadius.circular(8),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.file(
+                                    File(ImageManager.getImagePath(
+                                        _currentLog.imageFileNames![index])),
                                     fit: BoxFit.cover,
-                                  );
-                                }
-                                return Container(
-                                  color: theme.colorScheme.surfaceContainerHighest,
-                                  child: const Center(child: CircularProgressIndicator()),
-                                );
-                              },
-                            ),
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: theme.colorScheme
+                                          .surfaceContainerHighest,
+                                      child: const Center(
+                                          child: Icon(Icons.broken_image)),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // 删除按钮
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: GestureDetector(
+                                  onTap: () => _removeImageAt(index),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.close,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        // 删除按钮
-                        Positioned(
-                          top: 4,
-                          right: 4,
-                          child: GestureDetector(
-                            onTap: () => _removeImageAt(index),
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.close,
-                                size: 16,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     );
                   },
                 ),
@@ -616,8 +750,8 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                         ),
                       ),
                       Switch(
-                        value: themeProvider.offlineMode ? false : _aiEnabled,
-                        onChanged: themeProvider.offlineMode
+                        value: tp.$3 ? false : _aiEnabled,
+                        onChanged: tp.$3
                             ? null
                             : (value) => _saveAiEnabled(value),
                       ),
@@ -625,7 +759,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                   ),
                 ),
               ),
-              if (themeProvider.offlineMode)
+              if (tp.$3)
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
                   child: Text(
@@ -638,13 +772,13 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
 
               const SizedBox(height: 16),
 
-              if (!themeProvider.offlineMode &&
+              if (!tp.$3 &&
                   (_aiResponse != null || _isLoadingAi)) ...[
                 Container(
                   key: _aiCardKey,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: themeProvider.followSystem
+                    color: tp.$1
                         ? theme.colorScheme.primaryContainer.withValues(alpha: 77)
                         : theme.brightness == Brightness.dark
                             ? Colors.purple.shade700.withValues(alpha: 77)
@@ -730,5 +864,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
         ),
       ),
     );
+    },
+  );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/mood_log.dart';
@@ -9,193 +10,179 @@ import '../providers/theme_provider.dart';
 /// 静态图片路径缓存，避免 FutureBuilder 重复调用
 final Map<String, String> _imagePathCache = {};
 
-class MoodLogCard extends StatelessWidget {
+class MoodLogCard extends StatefulWidget {
   final MoodLog log;
   final VoidCallback onView;
   final ThemeData theme;
+  final VoidCallback onTogglePrivacy;
 
   const MoodLogCard({
     super.key,
     required this.log,
     required this.onView,
     required this.theme,
+    required this.onTogglePrivacy,
   });
+
+  @override
+  State<MoodLogCard> createState() => _MoodLogCardState();
+}
+
+class _MoodLogCardState extends State<MoodLogCard> {
+  late bool _isPrivate;
+
+  @override
+  void initState() {
+    super.initState();
+    _isPrivate = widget.log.isPrivate;
+  }
+
+  @override
+  void didUpdateWidget(covariant MoodLogCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.log.id != widget.log.id ||
+        oldWidget.log.isPrivate != widget.log.isPrivate) {
+      _isPrivate = widget.log.isPrivate;
+    }
+  }
+
+  void _togglePrivacy() {
+    setState(() => _isPrivate = !_isPrivate);
+    widget.onTogglePrivacy();
+  }
 
   bool get _isToday {
     final now = DateTime.now();
-    return log.createdAt.year == now.year &&
-        log.createdAt.month == now.month &&
-        log.createdAt.day == now.day;
+    return widget.log.createdAt.year == now.year &&
+        widget.log.createdAt.month == now.month &&
+        widget.log.createdAt.day == now.day;
   }
 
   String get _timeString {
     if (_isToday) {
-      return '今天 ${log.createdAt.hour.toString().padLeft(2, '0')}:${log.createdAt.minute.toString().padLeft(2, '0')}';
+      return '今天 ${widget.log.createdAt.hour.toString().padLeft(2, '0')}:${widget.log.createdAt.minute.toString().padLeft(2, '0')}';
     }
-    return '${log.createdAt.month}/${log.createdAt.day} ${log.createdAt.hour.toString().padLeft(2, '0')}:${log.createdAt.minute.toString().padLeft(2, '0')}';
+    return '${widget.log.createdAt.month}/${widget.log.createdAt.day} ${widget.log.createdAt.hour.toString().padLeft(2, '0')}:${widget.log.createdAt.minute.toString().padLeft(2, '0')}';
+  }
+
+  Color _getCorrectColor(ThemeProvider themeProvider, ThemeData theme) {
+    if (themeProvider.followSystem) {
+      return theme.colorScheme.onSurface;
+    }
+    return themeProvider.fontColor;
   }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final theme = Theme.of(context);
-
-    // 获取正确的文字颜色（本地函数）
-    Color getCorrectColor() {
-      if (themeProvider.followSystem) {
-        // 使用系统主题的文字颜色
-        return theme.colorScheme.onSurface;
-      } else {
-        // 使用自定义的字体颜色
-        return themeProvider.fontColor;
-      }
-    }
+    final textColor = _getCorrectColor(themeProvider, theme);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      color: log.mood.bgColor,
+      color: widget.log.mood.bgColor,
       child: InkWell(
-        onDoubleTap: onView,
+        onTap: widget.onView,
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: log.customColor ?? log.mood.color,
-            child: log.customEmoji != null
-                ? Text(log.customEmoji ?? '', style: const TextStyle(fontSize: 20))
-                : Icon(log.mood.icon, color: Colors.white),
+            backgroundColor: widget.log.customColor ?? widget.log.mood.color,
+            child: widget.log.customEmoji != null
+                ? Text(widget.log.customEmoji ?? '',
+                    style: const TextStyle(fontSize: 20))
+                : Icon(widget.log.mood.icon, color: Colors.white),
           ),
-          title: Text(
-            log.note,
-            style: TextStyle(
-              fontWeight: FontWeight.w500,
-              color: getCorrectColor(),
+          title: _PrivateText(
+            private: _isPrivate,
+            child: Text(
+              widget.log.note,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: textColor,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
           ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
-                  children: [
-                    Chip(
-                      label: Text(
-                        log.displayLabel,
-                        style: const TextStyle(
+          subtitle: _PrivateText(
+            private: _isPrivate,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    children: [
+                      Chip(
+                        label: Text(
+                          widget.log.displayLabel,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                          ),
+                        ),
+                        backgroundColor:
+                            widget.log.customColor ?? widget.log.mood.color,
+                        padding: EdgeInsets.zero,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _timeString,
+                        style: TextStyle(
                           fontSize: 12,
-                          color: Colors.white,
+                          color: textColor.withValues(alpha: 0.7),
                         ),
                       ),
-                      backgroundColor: log.customColor ?? log.mood.color,
-                      padding: EdgeInsets.zero,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _timeString,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: getCorrectColor().withValues(alpha: 0.7),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (log.comment.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  '批注: ${log.comment.length > 30 ? '${log.comment.substring(0, 30)}...' : log.comment}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                    color: getCorrectColor().withValues(alpha: 0.7),
+                    ],
                   ),
                 ),
+                if (widget.log.comment.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '批注: ${widget.log.comment.length > 30 ? '${widget.log.comment.substring(0, 30)}...' : widget.log.comment}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                      color: textColor.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-          trailing: log.imageFileNames != null && log.imageFileNames!.isNotEmpty
-              ? _buildImagePreview(log.imageFileName!, log.imageCount, theme)
-              : IconButton(
-                  icon: const Icon(Icons.visibility_outlined),
-                  color: theme.colorScheme.primary,
-                  onPressed: onView,
-                  tooltip: '查看详情/批注',
-                ),
+          trailing: IconButton(
+            icon: Icon(
+              _isPrivate
+                  ? Icons.visibility_off
+                  : Icons.visibility_outlined,
+            ),
+            color: _isPrivate
+                ? theme.colorScheme.error
+                : theme.colorScheme.primary,
+            onPressed: _togglePrivacy,
+            tooltip: _isPrivate ? '取消隐私' : '设为隐私',
+          ),
         ),
       ),
     );
   }
+}
 
-  /// 构建图片预览，使用缓存路径
-  Widget _buildImagePreview(String fileName, int imageCount, ThemeData theme) {
-    String cachedPath = _imagePathCache[fileName] ?? ImageManager.getImagePath(fileName);
+/// 隐私模式下对文字做模糊处理
+class _PrivateText extends StatelessWidget {
+  final bool private;
+  final Widget child;
 
-    // 缓存路径
-    _imagePathCache[fileName] = cachedPath;
+  const _PrivateText({required this.private, required this.child});
 
-    if (cachedPath.isNotEmpty && File(cachedPath).existsSync()) {
-      return Stack(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: theme.colorScheme.outline),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.file(
-                File(cachedPath),
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                cacheWidth: 96, // 限制图片尺寸，减少内存占用
-              ),
-            ),
-          ),
-          if (imageCount > 1)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '$imageCount',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: theme.colorScheme.onPrimary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          if (imageCount == 1)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.photo_size_select_actual_outlined,
-                  size: 12,
-                  color: theme.colorScheme.onPrimary,
-                ),
-              ),
-            ),
-        ],
-      );
-    }
-    return const Icon(Icons.visibility_outlined);
+  @override
+  Widget build(BuildContext context) {
+    if (!private) return child;
+    return ImageFiltered(
+      imageFilter: ui.ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+      child: child,
+    );
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'mood_list_page.dart';
 import 'profile_page.dart';
-import 'ai_chat_page.dart';
+import 'chat_list_page.dart';
 import 'message_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -13,24 +13,49 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
+  late final PageController _pageController;
 
   static const List<Widget> _pages = <Widget>[
     MoodListPage(),
-    AIChatPage(),
+    ChatListPage(),
     MessagePage(),
     ProfilePage(),
   ];
 
-  void _onItemTapped(int index) {
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: _selectedIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _onPageChanged(int index) {
     setState(() {
       _selectedIndex = index;
     });
   }
 
+  void _onItemTapped(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pages[_selectedIndex],
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: _onPageChanged,
+        children: _pages,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: _onItemTapped,

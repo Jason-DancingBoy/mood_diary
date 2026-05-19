@@ -12,14 +12,22 @@ class ThemeProvider with ChangeNotifier {
   bool _followSystem = true; // 默认为跟随系统
   Color? _previousFontColor; // 用于保存关闭夜间模式前的字体颜色
   String _apiKey = '';
+  Color? _userBubbleColor;
+  Color? _otherBubbleColor;
+  String? _chatBgPath;
+  bool _showMoodToFriends = true;
 
   Color get fontColor => _fontColor;
+  Color? get userBubbleColor => _userBubbleColor;
+  Color? get otherBubbleColor => _otherBubbleColor;
+  String? get chatBgPath => _chatBgPath;
   bool get offlineMode => _offlineMode;
   MessageFrequency get messageFrequency => _messageFrequency;
   MessageLogRange get messageLogRange => _messageLogRange;
   bool get nightMode => _nightMode;
   bool get followSystem => _followSystem;
   String get apiKey => _apiKey;
+  bool get showMoodToFriends => _showMoodToFriends;
 
   ThemeProvider() {
     _loadFontColor();
@@ -29,6 +37,9 @@ class ThemeProvider with ChangeNotifier {
     _loadNightMode();
     _loadFollowSystem();
     _loadApiKey();
+    _loadBubbleColors();
+    _loadChatBg();
+    _loadShowMoodToFriends();
   }
 
   Future<void> _loadFontColor() async {
@@ -140,5 +151,66 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('followSystem', value);
+  }
+
+  Future<void> _loadBubbleColors() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userColor = prefs.getInt('userBubbleColor');
+    _userBubbleColor = userColor != null ? Color(userColor) : null;
+    final otherColor = prefs.getInt('otherBubbleColor');
+    _otherBubbleColor = otherColor != null ? Color(otherColor) : null;
+    notifyListeners();
+  }
+
+  Future<void> setUserBubbleColor(Color? color) async {
+    _userBubbleColor = color;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (color != null) {
+      await prefs.setInt('userBubbleColor', color.toARGB32());
+    } else {
+      await prefs.remove('userBubbleColor');
+    }
+  }
+
+  Future<void> setOtherBubbleColor(Color? color) async {
+    _otherBubbleColor = color;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (color != null) {
+      await prefs.setInt('otherBubbleColor', color.toARGB32());
+    } else {
+      await prefs.remove('otherBubbleColor');
+    }
+  }
+
+  Future<void> _loadChatBg() async {
+    final prefs = await SharedPreferences.getInstance();
+    _chatBgPath = prefs.getString('chatBgPath');
+    notifyListeners();
+  }
+
+  Future<void> setChatBgPath(String? path) async {
+    _chatBgPath = path;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (path != null) {
+      await prefs.setString('chatBgPath', path);
+    } else {
+      await prefs.remove('chatBgPath');
+    }
+  }
+
+  Future<void> _loadShowMoodToFriends() async {
+    final prefs = await SharedPreferences.getInstance();
+    _showMoodToFriends = prefs.getBool('showMoodToFriends') ?? true;
+    notifyListeners();
+  }
+
+  Future<void> setShowMoodToFriends(bool value) async {
+    _showMoodToFriends = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('showMoodToFriends', value);
   }
 }
