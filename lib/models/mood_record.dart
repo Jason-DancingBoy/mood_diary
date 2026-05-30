@@ -8,11 +8,17 @@ class MoodRecord {
   final String note;
   final String comment;
   final List<String> imageUrls;
+  final String? audioUrl;
+  final int? audioDuration;
   final String? customEmoji;
   final String? customEmojiLabel;
   final int? customColorValue;
   final String? aiComfort;
   final bool aiEnabled;
+  final double? energy;
+  final double? pleasantness;
+  final String? emotionWord;
+  final String? quadrant;
   final DateTime createdAt;
 
   MoodRecord({
@@ -23,11 +29,17 @@ class MoodRecord {
     required this.note,
     this.comment = '',
     this.imageUrls = const [],
+    this.audioUrl,
+    this.audioDuration,
     this.customEmoji,
     this.customEmojiLabel,
     this.customColorValue,
     this.aiComfort,
     this.aiEnabled = true,
+    this.energy,
+    this.pleasantness,
+    this.emotionWord,
+    this.quadrant,
     required this.createdAt,
   });
 
@@ -42,11 +54,17 @@ class MoodRecord {
       imageUrls: map['image_urls'] != null
           ? List<String>.from(map['image_urls'] as List)
           : <String>[],
+      audioUrl: map['audio_url'] as String?,
+      audioDuration: map['audio_duration'] as int?,
       customEmoji: map['custom_emoji'] as String?,
       customEmojiLabel: map['custom_emoji_label'] as String?,
       customColorValue: map['custom_color_value'] as int?,
       aiComfort: map['ai_comfort'] as String?,
       aiEnabled: (map['ai_enabled'] as bool?) ?? true,
+      energy: (map['energy'] as num?)?.toDouble(),
+      pleasantness: (map['pleasantness'] as num?)?.toDouble(),
+      emotionWord: map['emotion_word'] as String?,
+      quadrant: map['quadrant'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }
@@ -59,11 +77,17 @@ class MoodRecord {
       'note': note,
       'comment': comment,
       'image_urls': imageUrls,
+      if (audioUrl != null) 'audio_url': audioUrl,
+      if (audioDuration != null) 'audio_duration': audioDuration,
       if (customEmoji != null) 'custom_emoji': customEmoji,
       if (customEmojiLabel != null) 'custom_emoji_label': customEmojiLabel,
       if (customColorValue != null) 'custom_color_value': customColorValue,
       if (aiComfort != null) 'ai_comfort': aiComfort,
       'ai_enabled': aiEnabled,
+      if (energy != null) 'energy': energy,
+      if (pleasantness != null) 'pleasantness': pleasantness,
+      if (emotionWord != null) 'emotion_word': emotionWord,
+      if (quadrant != null) 'quadrant': quadrant,
       'created_at': createdAt.toUtc().toIso8601String(),
     };
   }
@@ -77,11 +101,17 @@ class MoodRecord {
       note: log.note,
       comment: log.comment,
       imageUrls: const [], // Populated after image upload
+      audioUrl: log.voiceUrl,
+      audioDuration: log.voiceDuration,
       customEmoji: log.customEmoji,
       customEmojiLabel: log.customEmojiLabel,
       customColorValue: log.customColorValue,
       aiComfort: log.aiComfort,
       aiEnabled: log.aiEnabled,
+      energy: log.energy,
+      pleasantness: log.pleasantness,
+      emotionWord: log.emotionWord,
+      quadrant: log.quadrant,
       createdAt: log.createdAt,
     );
   }

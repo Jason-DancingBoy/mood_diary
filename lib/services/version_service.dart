@@ -65,9 +65,16 @@ class VersionService {
 
   /// 比较两个语义化版本号，返回 true 表示 [latest] 比 [current] 新
   static bool isNewer(String current, String latest) {
+    // 去掉构建元数据（+ 之后的部分）和预发布标识（- 之后的部分）
+    String clean(String v) {
+      var cleaned = v.split('+').first;
+      cleaned = cleaned.split('-').first;
+      return cleaned.trim();
+    }
+
     try {
-      final currentParts = current.split('.').map(int.parse).toList();
-      final latestParts = latest.split('.').map(int.parse).toList();
+      final currentParts = clean(current).split('.').map(int.parse).toList();
+      final latestParts = clean(latest).split('.').map(int.parse).toList();
 
       for (var i = 0; i < 3; i++) {
         final c = i < currentParts.length ? currentParts[i] : 0;
@@ -77,7 +84,7 @@ class VersionService {
       }
       return false;
     } catch (_) {
-      return current != latest;
+      return clean(current) != clean(latest);
     }
   }
 }

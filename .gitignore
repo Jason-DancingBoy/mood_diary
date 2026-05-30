@@ -11,6 +11,8 @@
 .svn/
 .swiftpm/
 .env
+# Release script (contains keys)
+release.sh
 migrate_working_dir/
 
 # IntelliJ related

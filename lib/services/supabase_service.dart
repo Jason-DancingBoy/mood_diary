@@ -19,8 +19,14 @@ class SupabaseService {
   static PostgrestQueryBuilder get sharedMoods =>
       Supabase.instance.client.from('shared_moods');
 
+  static PostgrestQueryBuilder get userMoodStatus =>
+      Supabase.instance.client.from('user_mood_status');
+
   static PostgrestQueryBuilder get friendMessages =>
       Supabase.instance.client.from('friend_messages');
+
+  static PostgrestQueryBuilder get tokenUsageLogs =>
+      Supabase.instance.client.from('token_usage_logs');
 
   static StorageFileApi get storage =>
       Supabase.instance.client.storage.from('mood_images');

@@ -7,6 +7,7 @@ import '../services/image_manager.dart';
 import '../services/remote_mood_service.dart';
 import '../services/shared_mood_service.dart';
 import '../services/image_upload_service.dart';
+import '../services/app_trace.dart';
 import '../widgets/log_editor_dialog.dart';
 import '../widgets/mood_log_card.dart';
 import '../enums/mood_type.dart';
@@ -15,6 +16,7 @@ import '../providers/auth_provider.dart';
 import '../providers/friend_provider.dart';
 import 'mood_calendar_page.dart';
 import 'mood_details_page.dart';
+import 'mood_statistics_page.dart';
 
 const String boxName = 'mood_logs_box';
 
@@ -80,6 +82,12 @@ class _MoodListPageState extends State<MoodListPage> {
     String? customEmoji,
     int? customColorValue,
     String? customEmojiLabel,
+    String? voiceFilePath,
+    int? voiceDuration,
+    double? energy,
+    double? pleasantness,
+    String? emotionWord,
+    String? quadrant,
   }) async {
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     final newLog = MoodLog(
@@ -90,10 +98,22 @@ class _MoodListPageState extends State<MoodListPage> {
       customEmoji: customEmoji,
       customEmojiLabel: customEmojiLabel,
       customColorValue: customColorValue,
+      voiceFilePath: voiceFilePath,
+      voiceDuration: voiceDuration,
       createdAt: DateTime.now(),
       aiEnabled: aiEnabled,
+      energy: energy,
+      pleasantness: pleasantness,
+      emotionWord: emotionWord,
+      quadrant: quadrant,
     );
+    AppTrace.start(TraceNode.moodCreateLocalSave);
     await _box.put(id, newLog.toMap());
+    AppTrace.end(TraceNode.moodCreateLocalSave, success: true);
+
+    AppTrace.start(TraceNode.moodCreateRemoteSync);
+    await RemoteMoodService.syncLatestMoodToStatus();
+    AppTrace.end(TraceNode.moodCreateRemoteSync, success: true);
   }
 
   /// 进入批量选择模式
@@ -179,6 +199,8 @@ class _MoodListPageState extends State<MoodListPage> {
         await _box.delete(log.id);
       }
 
+      RemoteMoodService.syncLatestMoodToStatus();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('已删除 $count 条记录')),
@@ -241,7 +263,7 @@ class _MoodListPageState extends State<MoodListPage> {
     // 统计每个心情的出现次数
     final moodCounts = <String, int>{};
     for (final log in todayLogs) {
-      final moodLabel = log.mood.label;
+      final moodLabel = log.effectiveEmotionWord;
       moodCounts[moodLabel] = (moodCounts[moodLabel] ?? 0) + 1;
     }
 
@@ -321,6 +343,19 @@ class _MoodListPageState extends State<MoodListPage> {
                     return;
                   }
                   _enterSelectionMode();
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.analytics_outlined),
+                tooltip: '心情分析',
+                onPressed: () {
+                  final logs = _currentLogs();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MoodStatisticsPage(logs: logs),
+                    ),
+                  );
                 },
               ),
               IconButton(
@@ -567,6 +602,7 @@ class _MoodListPageState extends State<MoodListPage> {
                     }
                   }
                   await _box.delete(log.id);
+                  RemoteMoodService.syncLatestMoodToStatus();
                 }
                 return confirmDelete == true;
               },
@@ -610,12 +646,19 @@ class _MoodListPageState extends State<MoodListPage> {
       builder: (context) => LogEditorDialog(
         initialLog: null,
         onSave: (mood, note, aiEnabled, customEmoji, customColorValue,
-            customEmojiLabel, imageFileNames) =>
+            customEmojiLabel, imageFileNames, voiceFilePath, voiceDuration,
+            [energy, pleasantness, emotionWord, quadrant]) =>
             _addLog(mood, note, aiEnabled,
                 imageFileNames: imageFileNames,
                 customEmoji: customEmoji,
                 customColorValue: customColorValue,
-                customEmojiLabel: customEmojiLabel),
+                customEmojiLabel: customEmojiLabel,
+                voiceFilePath: voiceFilePath,
+                voiceDuration: voiceDuration,
+                energy: energy,
+                pleasantness: pleasantness,
+                emotionWord: emotionWord,
+                quadrant: quadrant),
       ),
     );
 
@@ -628,6 +671,8 @@ class _MoodListPageState extends State<MoodListPage> {
     final moodType = shareData['mood'] as MoodType;
     final note = shareData['note'] as String;
     final imageFileNames = shareData['imageFileNames'] as List<String>?;
+    final voiceFilePath = shareData['voiceFilePath'] as String?;
+    final voiceDuration = shareData['voiceDuration'] as int?;
 
     final id = DateTime.now().millisecondsSinceEpoch.toString();
     final newLog = MoodLog(
@@ -635,8 +680,14 @@ class _MoodListPageState extends State<MoodListPage> {
       mood: moodType,
       note: note,
       imageFileNames: imageFileNames,
+      voiceFilePath: voiceFilePath,
+      voiceDuration: voiceDuration,
       createdAt: DateTime.now(),
       aiEnabled: shareData['aiEnabled'] as bool,
+      energy: shareData['energy'] as double?,
+      pleasantness: shareData['pleasantness'] as double?,
+      emotionWord: shareData['emotionWord'] as String?,
+      quadrant: shareData['quadrant'] as String?,
     );
 
     // 检查是否有好友

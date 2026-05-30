@@ -1,9 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/ai_assistant.dart';
 import '../providers/friend_provider.dart';
 import '../providers/theme_provider.dart';
 import '../enums/mood_type.dart';
+import '../services/friend_chat_service.dart';
 import '../services/remote_mood_service.dart';
 import '../utils/time_utils.dart';
 import 'ai_chat_page.dart';
@@ -20,10 +22,36 @@ class _ChatListPageState extends State<ChatListPage> {
   @override
   void initState() {
     super.initState();
+    FriendChatService.unreadFriendIds.addListener(_onUnreadChanged);
     RemoteMoodService.friendMoodsNotifier.addListener(_onMoodsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initData();
     });
+  }
+
+  void _onUnreadChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildFriendTrailing(String friendUserId) {
+    final hasUnread =
+        FriendChatService.unreadFriendIds.value.contains(friendUserId);
+    if (!hasUnread) return const Icon(Icons.chevron_right);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(
+            color: Colors.red,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 8),
+        const Icon(Icons.chevron_right),
+      ],
+    );
   }
 
   void _onMoodsChanged() {
@@ -31,9 +59,20 @@ class _ChatListPageState extends State<ChatListPage> {
   }
 
   Future<void> _initData() async {
+    FriendChatService.restoreUnreadState();
     await context.read<FriendProvider>().loadFriends();
     if (!mounted) return;
     await _ensureRealtime();
+    await _checkOfflineMessages();
+  }
+
+  Future<void> _checkOfflineMessages() async {
+    final friends = context.read<FriendProvider>().friends;
+    final friendIds = friends.map((f) => f.userId).toList();
+    final offlineUnread =
+        await FriendChatService.checkOfflineMessages(friendIds);
+    if (!mounted) return;
+    await FriendChatService.mergeUnread(offlineUnread);
   }
 
   Future<void> _ensureRealtime() async {
@@ -146,6 +185,7 @@ class _ChatListPageState extends State<ChatListPage> {
 
   @override
   void dispose() {
+    FriendChatService.unreadFriendIds.removeListener(_onUnreadChanged);
     RemoteMoodService.friendMoodsNotifier.removeListener(_onMoodsChanged);
     super.dispose();
   }
@@ -162,9 +202,9 @@ class _ChatListPageState extends State<ChatListPage> {
         foregroundColor:
             theme.colorScheme.onPrimaryContainer ?? Colors.white,
         actions: [
-          Selector<ThemeProvider, (Color?, Color?)>(
-            selector: (_, tp) => (tp.userBubbleColor, tp.otherBubbleColor),
-            builder: (context, bubbleColors, child) {
+          Selector<ThemeProvider, (Color?, Color?, bool)>(
+            selector: (_, tp) => (tp.userBubbleColor, tp.otherBubbleColor, tp.luoBoInterventionEnabled),
+            builder: (context, data, child) {
               final themeProvider = context.read<ThemeProvider>();
               return PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
@@ -174,14 +214,35 @@ class _ChatListPageState extends State<ChatListPage> {
                       _showBubbleColorPicker(context, themeProvider, true);
                     case 'other_bubble':
                       _showBubbleColorPicker(context, themeProvider, false);
+                    case 'luobo_intervention':
+                      themeProvider.setLuoBoInterventionEnabled(!data.$3);
                   }
                 },
                 itemBuilder: (context) => [
                   PopupMenuItem(
+                    value: 'luobo_intervention',
+                    child: ListTile(
+                      leading: Text(
+                        '🥕',
+                        style: TextStyle(fontSize: data.$3 ? 22 : 18),
+                      ),
+                      title: const Text('魔魔胡胡胡萝卜介入'),
+                      trailing: Switch(
+                        value: data.$3,
+                        onChanged: (v) {
+                          themeProvider.setLuoBoInterventionEnabled(v);
+                          Navigator.pop(context);
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  PopupMenuItem(
                     value: 'my_bubble',
                     child: ListTile(
                       leading: Icon(Icons.chat_bubble,
-                          color: bubbleColors.$1 ??
+                          color: data.$1 ??
                               theme.colorScheme.primary),
                       title: const Text('我的气泡颜色'),
                     ),
@@ -190,7 +251,7 @@ class _ChatListPageState extends State<ChatListPage> {
                     value: 'other_bubble',
                     child: ListTile(
                       leading: Icon(Icons.chat_bubble_outline,
-                          color: bubbleColors.$2 ??
+                          color: data.$2 ??
                               theme.colorScheme.surfaceContainerHighest),
                       title: const Text('对方气泡颜色'),
                     ),
@@ -214,7 +275,12 @@ class _ChatListPageState extends State<ChatListPage> {
                   : theme.brightness == Brightness.dark
                       ? assistant.color.withValues(alpha: 0.7)
                       : assistant.color,
-              child: Text(assistant.emoji, style: const TextStyle(fontSize: 20)),
+              backgroundImage: assistant.avatarAssetPath != null
+                  ? AssetImage(assistant.avatarAssetPath!)
+                  : null,
+              child: assistant.avatarAssetPath == null
+                  ? Text(assistant.emoji, style: const TextStyle(fontSize: 20))
+                  : null,
             ),
             title: Text(
               assistant.name,
@@ -292,14 +358,19 @@ class _ChatListPageState extends State<ChatListPage> {
                     leading: CircleAvatar(
                       backgroundColor:
                           theme.colorScheme.primaryContainer,
-                      child: Text(
-                        friend.nickname.isNotEmpty
-                            ? friend.nickname[0].toUpperCase()
-                            : '?',
-                        style: TextStyle(
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
-                      ),
+                      backgroundImage: friend.avatarUrl != null
+                          ? CachedNetworkImageProvider(friend.avatarUrl!)
+                          : null,
+                      child: friend.avatarUrl == null
+                          ? Text(
+                              friend.nickname.isNotEmpty
+                                  ? friend.nickname[0].toUpperCase()
+                                  : '?',
+                              style: TextStyle(
+                                color: theme.colorScheme.onPrimaryContainer,
+                              ),
+                            )
+                          : null,
                     ),
                     title: Text(
                       friend.nickname,
@@ -308,7 +379,7 @@ class _ChatListPageState extends State<ChatListPage> {
                       ),
                     ),
                     subtitle: _buildMoodSubtitle(friend.userId),
-                    trailing: const Icon(Icons.chevron_right),
+                    trailing: _buildFriendTrailing(friend.userId),
                     onTap: () {
                       Navigator.push(
                         context,

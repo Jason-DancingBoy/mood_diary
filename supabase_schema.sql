@@ -11,11 +11,15 @@ CREATE TABLE IF NOT EXISTS profiles (
     friend_code TEXT UNIQUE NOT NULL,
     avatar_url TEXT,
     bio TEXT DEFAULT '',
+    show_mood_to_friends BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+-- 为已有数据库补加 show_mood_to_friends 列
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS show_mood_to_friends BOOLEAN DEFAULT TRUE;
 
 DROP POLICY IF EXISTS "Profiles are viewable by all authenticated users" ON profiles;
 CREATE POLICY "Profiles are viewable by all authenticated users"
@@ -73,6 +77,8 @@ CREATE TABLE IF NOT EXISTS remote_moods (
     note TEXT NOT NULL DEFAULT '',
     comment TEXT DEFAULT '',
     image_urls TEXT[] DEFAULT '{}',
+    audio_url TEXT,
+    audio_duration INTEGER,
     custom_emoji TEXT,
     custom_emoji_label TEXT,
     custom_color_value INTEGER,
@@ -144,14 +150,44 @@ CREATE POLICY "Users can view moods shared with them"
         )
     );
 
+-- 4.5.1 允许好友查看开启了"向好友展示心情"的用户的心情
+DROP POLICY IF EXISTS "Friends can view moods of users who share them" ON remote_moods;
+CREATE POLICY "Friends can view moods of users who share them"
+    ON remote_moods FOR SELECT
+    USING (
+      owner_id IN (
+        SELECT id FROM profiles WHERE show_mood_to_friends = true
+      )
+      AND (
+        auth.uid() IN (
+          SELECT requester_id FROM friends
+          WHERE addressee_id = remote_moods.owner_id AND status = 'accepted'
+          UNION
+          SELECT addressee_id FROM friends
+          WHERE requester_id = remote_moods.owner_id AND status = 'accepted'
+        )
+      )
+    );
+
 -- 4.6 Friend Messages 表 (好友聊天消息)
 CREATE TABLE IF NOT EXISTS friend_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     receiver_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    image_url TEXT,
+    audio_url TEXT,
+    audio_duration INTEGER,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 为已存在的表补加列（幂等）
+ALTER TABLE remote_moods ADD COLUMN IF NOT EXISTS audio_url TEXT;
+ALTER TABLE remote_moods ADD COLUMN IF NOT EXISTS audio_duration INTEGER;
+ALTER TABLE friend_messages ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE friend_messages ADD COLUMN IF NOT EXISTS audio_url TEXT;
+ALTER TABLE friend_messages ADD COLUMN IF NOT EXISTS audio_duration INTEGER;
+ALTER TABLE friend_messages ADD COLUMN IF NOT EXISTS is_ai_message BOOLEAN DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_friend_messages_sender ON friend_messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_friend_messages_receiver ON friend_messages(receiver_id);
@@ -208,6 +244,49 @@ VALUES ('latest_version', '1.0.0'),
        ('force_update', 'false')
 ON CONFLICT (key) DO NOTHING;
 
+-- 6.5 User Mood Status 表 (好友当前心情状态，持续同步)
+CREATE TABLE IF NOT EXISTS user_mood_status (
+    owner_id UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+    mood_type TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE user_mood_status ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can insert their own mood status" ON user_mood_status;
+CREATE POLICY "Users can insert their own mood status"
+    ON user_mood_status FOR INSERT
+    WITH CHECK (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "Users can update their own mood status" ON user_mood_status;
+CREATE POLICY "Users can update their own mood status"
+    ON user_mood_status FOR UPDATE
+    USING (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "Users can delete their own mood status" ON user_mood_status;
+CREATE POLICY "Users can delete their own mood status"
+    ON user_mood_status FOR DELETE
+    USING (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "Friends can view mood status of users who share" ON user_mood_status;
+CREATE POLICY "Friends can view mood status of users who share"
+    ON user_mood_status FOR SELECT
+    USING (
+      owner_id IN (
+        SELECT id FROM profiles WHERE show_mood_to_friends = true
+      )
+      AND (
+        auth.uid() IN (
+          SELECT requester_id FROM friends
+          WHERE addressee_id = user_mood_status.owner_id AND status = 'accepted'
+          UNION
+          SELECT addressee_id FROM friends
+          WHERE requester_id = user_mood_status.owner_id AND status = 'accepted'
+        )
+      )
+    );
+
 -- 7. Realtime 配置 (好友心情实时更新)
 -- 必须执行以下 SQL，否则 Realtime 不会推送 remote_moods 变更事件
 
@@ -226,6 +305,104 @@ END $$;
 
 -- 7.2 设置 REPLICA IDENTITY FULL，确保 UPDATE/DELETE 事件包含完整旧数据
 ALTER TABLE public.remote_moods REPLICA IDENTITY FULL;
+
+-- 7.3 将 friend_messages 表加入 supabase_realtime 发布
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'friend_messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE friend_messages;
+  END IF;
+END $$;
+
+-- 7.4 设置 REPLICA IDENTITY FULL for friend_messages
+ALTER TABLE public.friend_messages REPLICA IDENTITY FULL;
+
+-- 7.5 将 friends 表加入 supabase_realtime 发布
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'friends'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE friends;
+  END IF;
+END $$;
+
+-- 7.6 设置 REPLICA IDENTITY FULL for friends，确保 UPDATE/DELETE 事件包含完整数据
+ALTER TABLE public.friends REPLICA IDENTITY FULL;
+
+-- 7.7 将 user_mood_status 表加入 supabase_realtime 发布
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'user_mood_status'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE user_mood_status;
+  END IF;
+END $$;
+
+-- 7.8 设置 REPLICA IDENTITY FULL for user_mood_status
+ALTER TABLE public.user_mood_status REPLICA IDENTITY FULL;
+
+-- ============================================
+-- 8. Mood Meter (RULER framework) migration
+-- ============================================
+
+-- Add Mood Meter coordinate fields to remote_moods
+ALTER TABLE remote_moods ADD COLUMN IF NOT EXISTS energy DOUBLE PRECISION;
+ALTER TABLE remote_moods ADD COLUMN IF NOT EXISTS pleasantness DOUBLE PRECISION;
+ALTER TABLE remote_moods ADD COLUMN IF NOT EXISTS emotion_word TEXT;
+ALTER TABLE remote_moods ADD COLUMN IF NOT EXISTS quadrant TEXT;
+
+-- Add Mood Meter coordinate fields to user_mood_status
+ALTER TABLE user_mood_status ADD COLUMN IF NOT EXISTS energy DOUBLE PRECISION;
+ALTER TABLE user_mood_status ADD COLUMN IF NOT EXISTS pleasantness DOUBLE PRECISION;
+ALTER TABLE user_mood_status ADD COLUMN IF NOT EXISTS emotion_word TEXT;
+ALTER TABLE user_mood_status ADD COLUMN IF NOT EXISTS quadrant TEXT;
+
+-- Indexes for quadrant-based queries
+CREATE INDEX IF NOT EXISTS idx_remote_moods_quadrant ON remote_moods(quadrant);
+CREATE INDEX IF NOT EXISTS idx_remote_moods_energy_pleasantness ON remote_moods(energy, pleasantness);
+
+-- ============================================
+-- 9. Token Usage Logs (API token 用量统计)
+-- ============================================
+CREATE TABLE IF NOT EXISTS token_usage_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'deepseek-chat',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_usage_user_id ON token_usage_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_token_usage_created_at ON token_usage_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_token_usage_user_month ON token_usage_logs(user_id, created_at);
+
+ALTER TABLE token_usage_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can insert their own token usage" ON token_usage_logs;
+CREATE POLICY "Users can insert their own token usage"
+    ON token_usage_logs FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can view their own token usage" ON token_usage_logs;
+CREATE POLICY "Users can view their own token usage"
+    ON token_usage_logs FOR SELECT
+    USING (auth.uid() = user_id);
 
 -- 6. friend_code 自动生成触发器
 CREATE OR REPLACE FUNCTION generate_friend_code()

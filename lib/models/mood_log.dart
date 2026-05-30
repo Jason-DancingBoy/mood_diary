@@ -6,7 +6,11 @@ class MoodLog {
   final MoodType mood;
   final String note;
   final String comment;
-  final List<String>? imageFileNames; // 支持多图片
+  final List<String>? imageFileNames; // 本地图片文件名
+  final List<String>? imageUrls; // 远端图片 URL（从云端恢复时使用）
+  final String? voiceFilePath; // 本地录音文件路径
+  final String? voiceUrl; // 远端录音 URL
+  final int? voiceDuration; // 录音时长（秒）
   final String? customEmoji;
   final String? customEmojiLabel;
   final int? customColorValue;
@@ -14,11 +18,18 @@ class MoodLog {
   final String? aiComfort;
   final bool aiEnabled;
   final bool isPrivate;
+  final double? energy;
+  final double? pleasantness;
+  final String? emotionWord;
+  final String? quadrant;
 
   // 兼容旧版本：获取第一张图片
   String? get imageFileName => imageFileNames?.isNotEmpty == true ? imageFileNames!.first : null;
-  // 获取图片数量
-  int get imageCount => imageFileNames?.length ?? 0;
+  // 获取所有可显示的图片数量（本地 + 远端）
+  int get imageCount => (imageFileNames?.length ?? 0) + (imageUrls?.length ?? 0);
+  // 是否有任何图片
+  bool get hasImages => imageCount > 0;
+  bool get hasVoice => voiceFilePath != null || voiceUrl != null;
 
   MoodLog({
     required this.id,
@@ -26,6 +37,10 @@ class MoodLog {
     required this.note,
     this.comment = '',
     this.imageFileNames,
+    this.imageUrls,
+    this.voiceFilePath,
+    this.voiceUrl,
+    this.voiceDuration,
     this.customEmoji,
     this.customEmojiLabel,
     this.customColorValue,
@@ -33,6 +48,10 @@ class MoodLog {
     this.aiComfort,
     this.aiEnabled = true,
     this.isPrivate = false,
+    this.energy,
+    this.pleasantness,
+    this.emotionWord,
+    this.quadrant,
   });
 
   factory MoodLog.fromMap(Map<dynamic, dynamic> map, String key) {
@@ -45,6 +64,11 @@ class MoodLog {
       imageFileNames = [map['imageFileName'] as String];
     }
 
+    List<String>? imageUrls;
+    if (map['imageUrls'] != null) {
+      imageUrls = List<String>.from(map['imageUrls'] as List);
+    }
+
     return MoodLog(
       id: key,
       mood: MoodType.values.firstWhere(
@@ -54,6 +78,10 @@ class MoodLog {
       note: map['note'] as String,
       comment: (map['comment'] as String?) ?? '',
       imageFileNames: imageFileNames,
+      imageUrls: imageUrls,
+      voiceFilePath: map['voiceFilePath'] as String?,
+      voiceUrl: map['voiceUrl'] as String?,
+      voiceDuration: map['voiceDuration'] as int?,
       customEmoji: map['customEmoji'] as String?,
       customEmojiLabel: map['customEmojiLabel'] as String?,
       customColorValue: map['customColorValue'] as int?,
@@ -61,6 +89,10 @@ class MoodLog {
       aiComfort: map['aiComfort'] as String?,
       aiEnabled: (map['aiEnabled'] as bool?) ?? true,
       isPrivate: (map['isPrivate'] as bool?) ?? false,
+      energy: (map['energy'] as num?)?.toDouble(),
+      pleasantness: (map['pleasantness'] as num?)?.toDouble(),
+      emotionWord: map['emotionWord'] as String?,
+      quadrant: map['quadrant'] as String?,
     );
   }
 
@@ -70,6 +102,10 @@ class MoodLog {
       'note': note,
       'comment': comment,
       if (imageFileNames != null && imageFileNames!.isNotEmpty) 'imageFileNames': imageFileNames,
+      if (imageUrls != null && imageUrls!.isNotEmpty) 'imageUrls': imageUrls,
+      if (voiceFilePath != null) 'voiceFilePath': voiceFilePath,
+      if (voiceUrl != null) 'voiceUrl': voiceUrl,
+      if (voiceDuration != null) 'voiceDuration': voiceDuration,
       if (customEmoji != null) 'customEmoji': customEmoji,
       if (customEmojiLabel != null) 'customEmojiLabel': customEmojiLabel,
       if (customColorValue != null) 'customColorValue': customColorValue,
@@ -77,19 +113,36 @@ class MoodLog {
       if (aiComfort != null) 'aiComfort': aiComfort,
       'aiEnabled': aiEnabled,
       'isPrivate': isPrivate,
+      if (energy != null) 'energy': energy,
+      if (pleasantness != null) 'pleasantness': pleasantness,
+      if (emotionWord != null) 'emotionWord': emotionWord,
+      if (quadrant != null) 'quadrant': quadrant,
     };
   }
 
   Color? get customColor => customColorValue != null ? Color(customColorValue!) : null;
   String get displayLabel {
-    // 优先级：自定义标签 > 自定义心情标记 > 系统心情标签
     if (customEmojiLabel != null && customEmojiLabel!.trim().isNotEmpty) {
       return customEmojiLabel!.trim();
     }
     if (customEmoji != null) {
       return '自定义';
     }
+    if (emotionWord != null && emotionWord!.isNotEmpty) {
+      return emotionWord!;
+    }
     return mood.label;
   }
   Color get displayColor => customColor ?? mood.color;
+
+  double get effectiveEnergy => energy ?? mood.toMoodMeterEnergy();
+  double get effectivePleasantness => pleasantness ?? mood.toMoodMeterPleasantness();
+  String get effectiveEmotionWord => (emotionWord != null && emotionWord!.isNotEmpty) ? emotionWord! : mood.label;
+  String get effectiveQuadrant {
+    if (quadrant != null) return quadrant!;
+    if (effectiveEnergy >= 0 && effectivePleasantness >= 0) return 'yellow';
+    if (effectiveEnergy >= 0 && effectivePleasantness < 0) return 'red';
+    if (effectiveEnergy < 0 && effectivePleasantness >= 0) return 'green';
+    return 'blue';
+  }
 }

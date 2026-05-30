@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -12,9 +14,11 @@ import '../services/ai_service.dart';
 import '../services/remote_mood_service.dart';
 import '../services/shared_mood_service.dart';
 import '../services/image_upload_service.dart';
+import '../services/voice_service.dart';
 import '../widgets/log_editor_dialog.dart';
 import '../utils/page_transitions.dart';
 import '../enums/mood_type.dart';
+import '../enums/mood_quadrant.dart';
 import '../providers/theme_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/friend_provider.dart';
@@ -40,6 +44,8 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
   String? _aiResponse;
   bool _isLoadingAi = false;
   late bool _aiEnabled;
+  bool _isPlayingVoice = false;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -71,6 +77,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -107,12 +114,16 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
           note: _currentLog.note,
           comment: _currentLog.comment,
           imageFileNames: _currentLog.imageFileNames,
+          voiceFilePath: _currentLog.voiceFilePath,
+          voiceUrl: _currentLog.voiceUrl,
+          voiceDuration: _currentLog.voiceDuration,
           createdAt: _currentLog.createdAt,
           aiComfort: comfort,
           aiEnabled: _aiEnabled,
         );
         await widget.box.put(_currentLog.id, updatedLog.toMap());
         _currentLog = updatedLog;
+        RemoteMoodService.syncLatestMoodToStatus();
       } catch (e) {
         setState(() {
           _isLoadingAi = false;
@@ -157,12 +168,16 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
       note: _currentLog.note,
       comment: _currentLog.comment,
       imageFileNames: _currentLog.imageFileNames,
+      voiceFilePath: _currentLog.voiceFilePath,
+      voiceUrl: _currentLog.voiceUrl,
+      voiceDuration: _currentLog.voiceDuration,
       createdAt: _currentLog.createdAt,
       aiComfort: _currentLog.aiComfort,
       aiEnabled: enabled,
     );
 
     await widget.box.put(_currentLog.id, updatedLog.toMap());
+    RemoteMoodService.syncLatestMoodToStatus();
     setState(() {
       _currentLog = updatedLog;
       _aiEnabled = enabled;
@@ -221,7 +236,13 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
               newCustomColorValue,
               newCustomEmojiLabel,
               newImageFileNames,
-            ) async {
+              newVoiceFilePath,
+              newVoiceDuration, [
+              newEnergy,
+              newPleasantness,
+              newEmotionWord,
+              newQuadrant,
+            ]) async {
               final offlineMode = Provider.of<ThemeProvider>(
                 context,
                 listen: false,
@@ -232,6 +253,9 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                 note: newNote,
                 comment: _currentLog.comment,
                 imageFileNames: newImageFileNames ?? _currentLog.imageFileNames,
+                voiceFilePath: newVoiceFilePath ?? _currentLog.voiceFilePath,
+                voiceUrl: _currentLog.voiceUrl,
+                voiceDuration: newVoiceDuration ?? _currentLog.voiceDuration,
                 customEmoji: newCustomEmoji,
                 customEmojiLabel: newCustomEmojiLabel,
                 customColorValue: newCustomColorValue,
@@ -240,8 +264,13 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                     ? null
                     : (newAiEnabled ? _currentLog.aiComfort : null),
                 aiEnabled: offlineMode ? false : newAiEnabled,
+                energy: newEnergy ?? _currentLog.energy,
+                pleasantness: newPleasantness ?? _currentLog.pleasantness,
+                emotionWord: newEmotionWord ?? _currentLog.emotionWord,
+                quadrant: newQuadrant ?? _currentLog.quadrant,
               );
               await widget.box.put(_currentLog.id, updatedLog.toMap());
+              RemoteMoodService.syncLatestMoodToStatus();
               if (mounted) {
                 setState(() {
                   _currentLog = updatedLog;
@@ -294,12 +323,16 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
         note: _currentLog.note,
         comment: _currentLog.comment,
         imageFileNames: updatedFileNames,
+        voiceFilePath: _currentLog.voiceFilePath,
+        voiceUrl: _currentLog.voiceUrl,
+        voiceDuration: _currentLog.voiceDuration,
         createdAt: _currentLog.createdAt,
         aiComfort: _currentLog.aiComfort,
         aiEnabled: _aiEnabled,
       );
 
       await widget.box.put(_currentLog.id, updatedLog.toMap());
+      RemoteMoodService.syncLatestMoodToStatus();
 
       if (mounted) {
         setState(() {
@@ -334,12 +367,16 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
       note: _currentLog.note,
       comment: _currentLog.comment,
       imageFileNames: updatedFileNames.isNotEmpty ? updatedFileNames : null,
+      voiceFilePath: _currentLog.voiceFilePath,
+      voiceUrl: _currentLog.voiceUrl,
+      voiceDuration: _currentLog.voiceDuration,
       createdAt: _currentLog.createdAt,
       aiComfort: _currentLog.aiComfort,
       aiEnabled: _aiEnabled,
     );
 
     await widget.box.put(_currentLog.id, updatedLog.toMap());
+    RemoteMoodService.syncLatestMoodToStatus();
 
     if (mounted) {
       setState(() {
@@ -468,6 +505,14 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
         }
       }
 
+      // 2.5 Upload voice if any
+      if (_currentLog.voiceFilePath != null) {
+        final voiceUrl = await VoiceService.uploadVoice(_currentLog.voiceFilePath!);
+        if (voiceUrl != null && _currentLog.voiceDuration != null) {
+          await RemoteMoodService.updateMoodAudio(moodId, voiceUrl, _currentLog.voiceDuration!);
+        }
+      }
+
       // 3. Create share record
       await SharedMoodService.shareMood(selectedFriend, moodId);
 
@@ -483,6 +528,63 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
         SnackBar(content: Text('分享失败: $e')),
       );
     }
+  }
+
+  Future<void> _playVoice() async {
+    if (_currentLog.voiceFilePath != null) {
+      final file = File(_currentLog.voiceFilePath!);
+      if (!await file.exists()) return;
+      setState(() => _isPlayingVoice = true);
+      await _audioPlayer.play(DeviceFileSource(_currentLog.voiceFilePath!));
+      _audioPlayer.onPlayerComplete.first.then((_) {
+        if (mounted) setState(() => _isPlayingVoice = false);
+      });
+    }
+  }
+
+  Future<void> _stopVoice() async {
+    await _audioPlayer.stop();
+    if (mounted) setState(() => _isPlayingVoice = false);
+  }
+
+  Widget _buildCoordinateInfo(Color textColor) {
+    final quad = MoodQuadrant.fromEnergyPleasantness(
+      _currentLog.energy!, _currentLog.pleasantness!,
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: quad.bgColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: quad.color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: quad.color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _currentLog.effectiveEmotionWord,
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: quad.color),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '能量${_currentLog.energy!.toStringAsFixed(1)}  愉悦${_currentLog.pleasantness!.toStringAsFixed(1)}',
+            style: TextStyle(fontSize: 12, color: textColor.withValues(alpha: 0.7)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -578,6 +680,10 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                             ),
                           ],
                         ),
+                        if (_currentLog.energy != null && _currentLog.pleasantness != null) ...[
+                          const SizedBox(height: 10),
+                          _buildCoordinateInfo(getCorrectColor()),
+                        ],
                         const SizedBox(height: 16),
                         Text(
                           '笔记:',
@@ -690,6 +796,88 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                     onPressed: _pickAndAddImages,
                     icon: const Icon(Icons.add_a_photo_outlined),
                     label: const Text('添加图片'),
+                  ),
+                ),
+              ],
+
+              // 远端图片 URL（从云端恢复的图片，只读显示）
+              if (_currentLog.imageUrls != null && _currentLog.imageUrls!.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final itemWidth = (constraints.maxWidth - 16) / 3;
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: List.generate(
+                        _currentLog.imageUrls!.length,
+                        (index) => SizedBox(
+                          width: itemWidth,
+                          height: itemWidth,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => FullScreenImageView(
+                                    imagePath: '',
+                                    imageUrls: _currentLog.imageUrls!,
+                                  ),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: CachedNetworkImage(
+                                imageUrl: _currentLog.imageUrls![index],
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) => Container(
+                                  color: theme.colorScheme.surfaceContainerHighest,
+                                  child: const Center(
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                                errorWidget: (_, __, ___) => Container(
+                                  color: theme.colorScheme.surfaceContainerHighest,
+                                  child: const Center(
+                                    child: Icon(Icons.cloud_off, size: 24),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+
+              // 语音播放区域
+              if (_currentLog.hasVoice) ...[
+                const SizedBox(height: 24),
+                Text('语音记录', style: theme.textTheme.titleMedium?.copyWith(color: getCorrectColor())),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(_isPlayingVoice ? Icons.pause : Icons.play_arrow),
+                        onPressed: _isPlayingVoice ? _stopVoice : _playVoice,
+                      ),
+                      Text(
+                        _currentLog.voiceDuration != null
+                            ? _formatDuration(_currentLog.voiceDuration!)
+                            : '--:--',
+                        style: theme.textTheme.bodyMedium?.copyWith(color: getCorrectColor()),
+                      ),
+                    ],
                   ),
                 ),
               ],

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../enums/message_frequency.dart';
@@ -16,6 +17,16 @@ class ThemeProvider with ChangeNotifier {
   Color? _otherBubbleColor;
   String? _chatBgPath;
   bool _showMoodToFriends = true;
+  bool _luoBoInterventionEnabled = false;
+  bool _useTraditionalChinese = false;
+  bool _ttsEnabled = false;
+  String _ttsVoiceId = '';
+  String _ttsApiKey = '';
+  String _realtimeAppId = '';
+  String _realtimeAccessToken = '';
+  bool _noEssayMode = false;
+  bool _proactiveChatEnabled = false;
+  bool _voiceEmotionEnabled = true;
 
   Color get fontColor => _fontColor;
   Color? get userBubbleColor => _userBubbleColor;
@@ -28,6 +39,16 @@ class ThemeProvider with ChangeNotifier {
   bool get followSystem => _followSystem;
   String get apiKey => _apiKey;
   bool get showMoodToFriends => _showMoodToFriends;
+  bool get luoBoInterventionEnabled => _luoBoInterventionEnabled;
+  bool get useTraditionalChinese => _useTraditionalChinese;
+  bool get ttsEnabled => _ttsEnabled;
+  String get ttsVoiceId => _ttsVoiceId;
+  String get ttsApiKey => _ttsApiKey;
+  String get realtimeAppId => _realtimeAppId;
+  String get realtimeAccessToken => _realtimeAccessToken;
+  bool get noEssayMode => _noEssayMode;
+  bool get proactiveChatEnabled => _proactiveChatEnabled;
+  bool get voiceEmotionEnabled => _voiceEmotionEnabled;
 
   ThemeProvider() {
     _loadFontColor();
@@ -40,6 +61,16 @@ class ThemeProvider with ChangeNotifier {
     _loadBubbleColors();
     _loadChatBg();
     _loadShowMoodToFriends();
+    _loadLuoBoInterventionEnabled();
+    _loadUseTraditionalChinese();
+    _loadTtsEnabled();
+    _loadTtsVoiceId();
+    _loadTtsApiKey();
+    _loadRealtimeAppId();
+    _loadRealtimeAccessToken();
+    _loadNoEssayMode();
+    _loadProactiveChatEnabled();
+    _loadVoiceEmotionEnabled();
   }
 
   Future<void> _loadFontColor() async {
@@ -115,6 +146,83 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('apiKey');
+  }
+
+  /// 导入 JSON 配置，一键设置所有 API 密钥。
+  /// 返回 null 表示全部成功，否则返回错误信息。
+  /// 支持的 JSON 格式：
+  /// {
+  ///   "apiKey": "sk-...",           // DeepSeek API Key
+  ///   "ttsVoiceId": "...",          // 火山引擎音色 ID
+  ///   "ttsApiKey": "...",           // 火山引擎 API Key
+  ///   "realtimeAppId": "...",       // 火山引擎实时语音 App ID
+  ///   "realtimeAccessToken": "..."  // 火山引擎实时语音 Access Token
+  /// }
+  /// 所有字段均可选，只更新提供的字段。
+  Future<String?> importApiConfig(String jsonText) async {
+    if (jsonText.trim().isEmpty) return '配置文本为空';
+
+    Map<String, dynamic> config;
+    try {
+      config = jsonDecode(jsonText.trim()) as Map<String, dynamic>;
+    } catch (e) {
+      return 'JSON 格式无效，请检查后重试';
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    if (config.containsKey('apiKey')) {
+      final v = config['apiKey'];
+      if (v is String && v.isNotEmpty) {
+        _apiKey = v;
+        await prefs.setString('apiKey', v);
+      } else {
+        return 'apiKey 字段无效（需要非空字符串）';
+      }
+    }
+
+    if (config.containsKey('ttsApiKey')) {
+      final v = config['ttsApiKey'];
+      if (v is String && v.isNotEmpty) {
+        _ttsApiKey = v;
+        await prefs.setString('ttsApiKey', v);
+      } else {
+        return 'ttsApiKey 字段无效（需要非空字符串）';
+      }
+    }
+
+    if (config.containsKey('ttsVoiceId')) {
+      final v = config['ttsVoiceId'];
+      if (v is String && v.isNotEmpty) {
+        _ttsVoiceId = v;
+        await prefs.setString('ttsVoiceId', v);
+      } else {
+        return 'ttsVoiceId 字段无效（需要非空字符串）';
+      }
+    }
+
+    if (config.containsKey('realtimeAppId')) {
+      final v = config['realtimeAppId'];
+      if (v is String && v.isNotEmpty) {
+        _realtimeAppId = v;
+        await prefs.setString('realtimeAppId', v);
+      } else {
+        return 'realtimeAppId 字段无效（需要非空字符串）';
+      }
+    }
+
+    if (config.containsKey('realtimeAccessToken')) {
+      final v = config['realtimeAccessToken'];
+      if (v is String && v.isNotEmpty) {
+        _realtimeAccessToken = v;
+        await prefs.setString('realtimeAccessToken', v);
+      } else {
+        return 'realtimeAccessToken 字段无效（需要非空字符串）';
+      }
+    }
+
+    notifyListeners();
+    return null;
   }
 
   Future<void> _loadNightMode() async {
@@ -213,4 +321,139 @@ class ThemeProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('showMoodToFriends', value);
   }
+
+  Future<void> _loadLuoBoInterventionEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    _luoBoInterventionEnabled = prefs.getBool('luoBoInterventionEnabled') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> setLuoBoInterventionEnabled(bool value) async {
+    _luoBoInterventionEnabled = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('luoBoInterventionEnabled', value);
+  }
+
+  Future<void> _loadUseTraditionalChinese() async {
+    final prefs = await SharedPreferences.getInstance();
+    _useTraditionalChinese = prefs.getBool('useTraditionalChinese') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> setUseTraditionalChinese(bool value) async {
+    _useTraditionalChinese = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('useTraditionalChinese', value);
+  }
+
+  void toggleTraditionalChinese() {
+    setUseTraditionalChinese(!_useTraditionalChinese);
+  }
+
+  Future<void> _loadTtsEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    _ttsEnabled = prefs.getBool('ttsEnabled') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> setTtsEnabled(bool value) async {
+    _ttsEnabled = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ttsEnabled', value);
+  }
+
+  Future<void> _loadTtsVoiceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    _ttsVoiceId = prefs.getString('ttsVoiceId') ?? '';
+    notifyListeners();
+  }
+
+  Future<void> setTtsVoiceId(String value) async {
+    _ttsVoiceId = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ttsVoiceId', value);
+  }
+
+  Future<void> _loadTtsApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    _ttsApiKey = prefs.getString('ttsApiKey') ?? '';
+    notifyListeners();
+  }
+
+  Future<void> setTtsApiKey(String value) async {
+    _ttsApiKey = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ttsApiKey', value);
+  }
+
+  Future<void> _loadRealtimeAppId() async {
+    final prefs = await SharedPreferences.getInstance();
+    _realtimeAppId = prefs.getString('realtimeAppId') ?? '';
+    notifyListeners();
+  }
+
+  Future<void> setRealtimeAppId(String value) async {
+    _realtimeAppId = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('realtimeAppId', value);
+  }
+
+  Future<void> _loadRealtimeAccessToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    _realtimeAccessToken = prefs.getString('realtimeAccessToken') ?? '';
+    notifyListeners();
+  }
+
+  Future<void> setRealtimeAccessToken(String value) async {
+    _realtimeAccessToken = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('realtimeAccessToken', value);
+  }
+
+  Future<void> _loadNoEssayMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    _noEssayMode = prefs.getBool('noEssayMode') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> setNoEssayMode(bool value) async {
+    _noEssayMode = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('noEssayMode', value);
+  }
+
+  Future<void> _loadProactiveChatEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    _proactiveChatEnabled = prefs.getBool('proactiveChatEnabled') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> setProactiveChatEnabled(bool value) async {
+    _proactiveChatEnabled = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('proactiveChatEnabled', value);
+  }
+
+  Future<void> _loadVoiceEmotionEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    _voiceEmotionEnabled = prefs.getBool('voiceEmotionEnabled') ?? true;
+    notifyListeners();
+  }
+
+  Future<void> setVoiceEmotionEnabled(bool value) async {
+    _voiceEmotionEnabled = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('voiceEmotionEnabled', value);
+  }
+
 }

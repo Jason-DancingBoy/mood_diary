@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../enums/mood_type.dart';
@@ -31,7 +32,9 @@ class _FriendListPageState extends State<FriendListPage> {
   }
 
   Future<void> _initData() async {
-    await context.read<FriendProvider>().loadFriends();
+    final fp = context.read<FriendProvider>();
+    await fp.loadFriends();
+    fp.startFriendListRealtime();
     if (!mounted) return;
     await _ensureRealtime();
   }
@@ -182,17 +185,23 @@ class _FriendListPageState extends State<FriendListPage> {
                 final friend = friendProvider.friends[index];
                 return ListTile(
                   leading: CircleAvatar(
+                    radius: 20,
                     backgroundColor:
                         theme.colorScheme.primaryContainer,
-                    child: Text(
-                      friend.nickname.isNotEmpty
-                          ? friend.nickname[0].toUpperCase()
-                          : '?',
-                      style: TextStyle(
-                        color:
-                            theme.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
+                    backgroundImage: friend.avatarUrl != null
+                        ? CachedNetworkImageProvider(friend.avatarUrl!)
+                        : null,
+                    child: friend.avatarUrl != null
+                        ? null
+                        : Text(
+                            friend.nickname.isNotEmpty
+                                ? friend.nickname[0].toUpperCase()
+                                : '?',
+                            style: TextStyle(
+                              color:
+                                  theme.colorScheme.onPrimaryContainer,
+                            ),
+                          ),
                   ),
                   title: Text(
                     friend.nickname,
@@ -229,6 +238,7 @@ class _FriendListPageState extends State<FriendListPage> {
 
   @override
   void dispose() {
+    context.read<FriendProvider>().stopFriendListRealtime();
     RemoteMoodService.friendMoodsNotifier.removeListener(_onMoodsChanged);
     super.dispose();
   }

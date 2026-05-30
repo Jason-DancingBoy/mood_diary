@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../models/mood_log.dart';
 import '../services/image_manager.dart';
 import '../enums/mood_type.dart';
+import '../enums/mood_quadrant.dart';
 import '../providers/theme_provider.dart';
 
 /// 静态图片路径缓存，避免 FutureBuilder 重复调用
@@ -127,6 +128,19 @@ class _MoodLogCardState extends State<MoodLogCard> {
                             MaterialTapTargetSize.shrinkWrap,
                         visualDensity: VisualDensity.compact,
                       ),
+                      if (widget.log.energy != null && widget.log.pleasantness != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: MoodQuadrant.fromEnergyPleasantness(
+                              widget.log.energy!, widget.log.pleasantness!,
+                            ).color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
                       const SizedBox(width: 8),
                       Text(
                         _timeString,

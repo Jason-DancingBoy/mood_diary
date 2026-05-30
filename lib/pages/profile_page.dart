@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -10,12 +9,19 @@ import '../enums/message_log_range.dart';
 import '../providers/theme_provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/auth_service.dart';
+import '../services/remote_mood_service.dart';
 import '../providers/friend_provider.dart';
 import '../providers/shared_mood_provider.dart';
 import 'login_page.dart';
 import 'friend_list_page.dart';
 import 'friend_request_page.dart';
 import 'shared_moods_page.dart';
+import 'personal_info_page.dart';
+import '../services/version_service.dart';
+import '../services/supabase_service.dart';
+import '../services/token_usage_tracker.dart';
+import '../widgets/update_dialog.dart';
+import 'voice_sample_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -53,175 +59,106 @@ class ProfilePage extends StatelessWidget {
               if (authProvider.isLoggedIn && authProvider.profile != null) {
                 return Column(
                   children: [
-                    // User info card
+                    // User info card — tappable, navigates to personal info
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              GestureDetector(
-                                onTap: () =>
-                                    _pickAndUploadAvatar(context),
-                                child: Stack(
-                                  children: [
-                                    SizedBox(
-                                      width: 56,
-                                      height: 56,
-                                      child: ClipOval(
-                                        child: (() {
-                                          final fallback = Container(
-                                            color: theme.colorScheme
-                                                .primaryContainer,
-                                            alignment: Alignment.center,
-                                            child: Text(
-                                              authProvider.profile!.nickname
-                                                      .isNotEmpty
-                                                  ? authProvider
-                                                      .profile!.nickname[0]
-                                                      .toUpperCase()
-                                                  : '?',
-                                              style: TextStyle(
-                                                fontSize: 24,
-                                                fontWeight: FontWeight.bold,
-                                                color: theme
-                                                    .colorScheme
-                                                    .onPrimaryContainer,
-                                              ),
-                                            ),
-                                          );
-                                          // During upload, show the picked file
-                                          if (authProvider.localAvatarPath !=
-                                              null) {
-                                            return Image.file(
-                                              File(authProvider
-                                                  .localAvatarPath!),
-                                              fit: BoxFit.cover,
-                                            );
-                                          }
-                                          // Show locally cached copy (avoids network on rebuild)
-                                          if (authProvider.cachedAvatarPath !=
-                                              null) {
-                                            return Image.file(
-                                              File(authProvider
-                                                  .cachedAvatarPath!),
-                                              fit: BoxFit.cover,
-                                            );
-                                          }
-                                          if (authProvider.profile!.avatarUrl !=
-                                              null) {
-                                            return CachedNetworkImage(
-                                              imageUrl: authProvider
-                                                  .profile!.avatarUrl!,
-                                              fit: BoxFit.cover,
-                                              placeholder: (c, u) => fallback,
-                                              errorWidget: (c, u, e) =>
-                                                  fallback,
-                                            );
-                                          }
-                                          return fallback;
-                                        })(),
-                                      ),
-                                    ),
-                                    Positioned(
-                                      bottom: 0,
-                                      right: 0,
-                                      child: Container(
-                                        width: 20,
-                                        height: 20,
-                                        decoration: BoxDecoration(
-                                          color:
-                                              theme.colorScheme.primary,
-                                          shape: BoxShape.circle,
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const PersonalInfoPage()),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 56,
+                                  height: 56,
+                                  child: ClipOval(
+                                    child: (() {
+                                      final fallback = Container(
+                                        color: theme.colorScheme.primaryContainer,
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          authProvider.profile!.nickname.isNotEmpty
+                                              ? authProvider.profile!.nickname[0]
+                                                  .toUpperCase()
+                                              : '?',
+                                          style: TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: theme
+                                                .colorScheme.onPrimaryContainer,
+                                          ),
                                         ),
-                                        child: const Icon(
-                                          Icons.camera_alt,
-                                          size: 12,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                      );
+                                      if (authProvider.localAvatarPath != null) {
+                                        return Image.file(
+                                          File(authProvider.localAvatarPath!),
+                                          fit: BoxFit.cover,
+                                        );
+                                      }
+                                      if (authProvider.cachedAvatarPath != null) {
+                                        return Image.file(
+                                          File(authProvider.cachedAvatarPath!),
+                                          fit: BoxFit.cover,
+                                        );
+                                      }
+                                      if (authProvider.profile!.avatarUrl != null) {
+                                        return CachedNetworkImage(
+                                          imageUrl:
+                                              authProvider.profile!.avatarUrl!,
+                                          fit: BoxFit.cover,
+                                          placeholder: (c, u) => fallback,
+                                          errorWidget: (c, u, e) => fallback,
+                                        );
+                                      }
+                                      return fallback;
+                                    })(),
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _showEditNicknameDialog(
-                                        context,
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
                                         authProvider.profile!.nickname,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Flexible(
-                                            child: Text(
-                                              authProvider.profile!.nickname,
-                                              style: theme
-                                                  .textTheme
-                                                  .titleMedium
-                                                  ?.copyWith(
-                                                color: _getCorrectColor(
-                                                    themeProvider, theme),
-                                              ),
-                                              overflow:
-                                                  TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Icon(
-                                            Icons.edit,
-                                            size: 16,
-                                            color: _getCorrectColor(
-                                                    themeProvider, theme)
-                                                .withValues(alpha: 0.4),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            '好友码: ${authProvider.profile!.friendCode}',
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                              color: _getCorrectColor(
-                                                      themeProvider, theme)
-                                                  .withValues(alpha: 0.6),
-                                              fontFamily: 'monospace',
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                          color: _getCorrectColor(
+                                              themeProvider, theme),
                                         ),
-                                        const SizedBox(width: 4),
-                                        InkWell(
-                                          onTap: () => _copyFriendCode(
-                                            context,
-                                            authProvider.profile!.friendCode,
-                                          ),
-                                          child: Icon(
-                                            Icons.copy,
-                                            size: 14,
-                                            color: _getCorrectColor(
-                                                    themeProvider, theme)
-                                                .withValues(alpha: 0.4),
-                                          ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '好友码: ${authProvider.profile!.friendCode}',
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          color: _getCorrectColor(
+                                                  themeProvider, theme)
+                                              .withValues(alpha: 0.6),
+                                          fontFamily: 'monospace',
                                         ),
-                                      ],
-                                    ),
-                                  ],
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                                Icon(
+                                  Icons.chevron_right,
+                                  color: _getCorrectColor(themeProvider, theme)
+                                      .withValues(alpha: 0.3),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -491,6 +428,23 @@ class ProfilePage extends StatelessWidget {
             value: themeProvider.offlineMode,
             onChanged: (value) => themeProvider.setOfflineMode(value),
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.chat_bubble_outline),
+            title: Text(
+              '防 AI 小作文模式',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
+            ),
+            subtitle: Text(
+              '开启后 AI 回复更像真人微信聊天：短句、口语化、不写长篇大论',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+              ),
+            ),
+            value: themeProvider.noEssayMode,
+            onChanged: (value) => themeProvider.setNoEssayMode(value),
+          ),
           ListTile(
             leading: const Icon(Icons.vpn_key),
             title: Text(
@@ -509,6 +463,50 @@ class ProfilePage extends StatelessWidget {
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showApiKeyDialog(context, themeProvider),
+          ),
+          _TokenUsageTile(themeProvider: themeProvider, theme: theme),
+          ListTile(
+            leading: const Icon(Icons.system_update_alt),
+            title: Text(
+              '导入配置',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
+            ),
+            subtitle: Text(
+              '粘贴 JSON 文本，一键设置所有 API 密钥',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showImportConfigDialog(context, themeProvider),
+          ),
+          ListTile(
+            leading: const Text('🥕', style: TextStyle(fontSize: 22)),
+            title: Text(
+              '萝卜语音设置',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme),
+              ),
+            ),
+            subtitle: Text(
+              themeProvider.ttsVoiceId.isNotEmpty
+                  ? themeProvider.ttsEnabled
+                      ? '已开启 · 萝卜会用你的音色说话'
+                      : '已录制音色 · 当前未开启'
+                  : '录制你的声音，让萝卜用你的音色发语音',
+              style: TextStyle(
+                color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const VoiceSamplePage()),
+              );
+            },
           ),
           SwitchListTile(
             secondary: Icon(
@@ -582,6 +580,11 @@ class ProfilePage extends StatelessWidget {
               try {
                 AuthService.updateProfile(showMoodToFriends: value);
               } catch (_) {}
+              if (value) {
+                RemoteMoodService.syncLatestMoodToStatus();
+              } else {
+                RemoteMoodService.clearMoodStatus();
+              }
             },
           ),
           const Divider(),
@@ -632,50 +635,90 @@ class ProfilePage extends StatelessWidget {
             onTap: () => _showLogRangePicker(context, themeProvider),
           ),
           ListTile(
-            leading: const Icon(Icons.info),
-            title: Text('关于', style: TextStyle(
+            leading: const Icon(Icons.cloud_download),
+            title: Text('从云端恢复数据', style: TextStyle(
               color: _getCorrectColor(themeProvider, theme),
             )),
             subtitle: Text(
-              '版本 1.0.0',
+              '将之前上传到云端的心情记录恢复到本地',
               style: TextStyle(
                 color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
               ),
             ),
-            onTap: () {
-              // 可以添加关于页面的逻辑
+            onTap: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              messenger.showSnackBar(
+                const SnackBar(content: Text('正在恢复数据...')),
+              );
+              final count = await RemoteMoodService.restoreMoodsIfNeeded();
+              messenger.hideCurrentSnackBar();
+              if (count > 0) {
+                messenger.showSnackBar(
+                  SnackBar(content: Text('已恢复 $count 条心情记录')),
+                );
+              } else if (count == 0) {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('没有需要恢复的数据')),
+                );
+              } else {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('恢复失败，请检查网络')),
+                );
+              }
             },
+          ),
+          ListTile(
+            leading: const Icon(Icons.info),
+            title: Text('关于', style: TextStyle(
+              color: _getCorrectColor(themeProvider, theme),
+            )),
+            subtitle: FutureBuilder<String>(
+              future: VersionService.currentVersion,
+              builder: (context, snapshot) {
+                final version = snapshot.data ?? '';
+                return Text(
+                  '版本 $version',
+                  style: TextStyle(
+                    color: _getCorrectColor(themeProvider, theme).withValues(alpha: 0.7),
+                  ),
+                );
+              },
+            ),
+            onTap: () => _checkUpdate(context),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _pickAndUploadAvatar(BuildContext context) async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 256,
-      maxHeight: 256,
-      imageQuality: 75,
+  Future<void> _checkUpdate(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('正在检查更新...'), duration: Duration(seconds: 1)),
     );
-    if (picked == null) return;
+
+    final currentVersion = await VersionService.currentVersion;
+    final latest = await VersionService.getLatestVersion();
 
     if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
 
-    try {
-      await context.read<AuthProvider>().updateAvatar(File(picked.path));
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('头像已更新')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('头像更新失败: $e')),
-        );
-      }
+    if (latest == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('检查更新失败，请稍后重试')),
+      );
+      return;
+    }
+
+    if (VersionService.isNewer(currentVersion, latest.latestVersion)) {
+      showDialog(
+        context: context,
+        builder: (_) => UpdateDialog(versionInfo: latest),
+      );
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('已是最新版本')),
+      );
     }
   }
 
@@ -715,49 +758,6 @@ class ProfilePage extends StatelessWidget {
         );
       }
     }
-  }
-
-  void _showEditNicknameDialog(
-      BuildContext context, String currentNickname) {
-    final controller = TextEditingController(text: currentNickname);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('修改昵称'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 20,
-          decoration: const InputDecoration(
-            labelText: '昵称',
-            hintText: '请输入新昵称',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              final newNickname = controller.text.trim();
-              if (newNickname.isEmpty) return;
-              context.read<AuthProvider>().updateNickname(newNickname);
-              Navigator.pop(ctx);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _copyFriendCode(BuildContext context, String code) {
-    Clipboard.setData(ClipboardData(text: code));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('好友码已复制到剪贴板')),
-    );
   }
 
   void _showApiKeyDialog(BuildContext context, ThemeProvider themeProvider) {
@@ -801,6 +801,131 @@ class ProfilePage extends StatelessWidget {
               );
             },
             child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImportConfigDialog(BuildContext context, ThemeProvider themeProvider) {
+    final controller = TextEditingController();
+    const template = '''{
+  "apiKey": "sk-...",
+  "ttsApiKey": "...",
+  "ttsVoiceId": "...",
+  "realtimeAppId": "...",
+  "realtimeAccessToken": "..."
+}''';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.system_update_alt, size: 20),
+            SizedBox(width: 8),
+            Text('导入 API 配置'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '粘贴包含 API 密钥的 JSON 文本，一键配置所有服务。'
+                  '所有字段均可选，只更新你提供的字段。',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(ctx).colorScheme.outline,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  maxLines: 10,
+                  minLines: 5,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: template,
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.all(12),
+                    hintStyle: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      color: Theme.of(ctx).colorScheme.outline.withValues(alpha: 0.5),
+                    ),
+                    hintMaxLines: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          if (themeProvider.apiKey.isNotEmpty ||
+              themeProvider.ttsApiKey.isNotEmpty ||
+              themeProvider.ttsVoiceId.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                showDialog(
+                  context: ctx,
+                  builder: (c2) => AlertDialog(
+                    title: const Text('清除全部配置'),
+                    content: const Text('确定要清除所有 API 配置吗？'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(c2),
+                        child: const Text('取消'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          themeProvider.clearApiKey();
+                          themeProvider.setTtsApiKey('');
+                          themeProvider.setTtsVoiceId('');
+                          themeProvider.setRealtimeAppId('');
+                          themeProvider.setRealtimeAccessToken('');
+                          Navigator.pop(c2);
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已清除全部 API 配置')),
+                          );
+                        },
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('清除'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('清除全部'),
+            ),
+          FilledButton(
+            onPressed: () async {
+              final error = await themeProvider.importApiConfig(controller.text);
+              if (!ctx.mounted) return;
+              if (error == null) {
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('配置导入成功')),
+                );
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(content: Text(error)),
+                );
+              }
+            },
+            child: const Text('导入'),
           ),
         ],
       ),
@@ -931,6 +1056,209 @@ class ProfilePage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _TokenUsageTile extends StatelessWidget {
+  final ThemeProvider themeProvider;
+  final ThemeData theme;
+
+  const _TokenUsageTile({required this.themeProvider, required this.theme});
+
+  Color _getColor() {
+    if (themeProvider.followSystem) {
+      return theme.colorScheme.onSurface;
+    }
+    return themeProvider.fontColor;
+  }
+
+  /// 查询本月统计：优先 Supabase（登录状态），否则用本地文件
+  Future<MonthlyStats> _fetchMonthlyStats() async {
+    final userId = SupabaseService.auth.currentUser?.id;
+    if (userId != null) {
+      try {
+        final now = DateTime.now();
+        final monthStart = DateTime.utc(now.year, now.month, 1).toIso8601String();
+        final result = await SupabaseService.tokenUsageLogs
+            .select('prompt_tokens, completion_tokens, total_tokens')
+            .eq('user_id', userId)
+            .gte('created_at', monthStart);
+
+        final rows = result as List<dynamic>;
+        int prompt = 0, completion = 0, total = 0;
+        for (final row in rows) {
+          prompt += (row['prompt_tokens'] as int?) ?? 0;
+          completion += (row['completion_tokens'] as int?) ?? 0;
+          total += (row['total_tokens'] as int?) ?? 0;
+        }
+        return MonthlyStats(
+          promptTokens: prompt,
+          completionTokens: completion,
+          totalTokens: total,
+          callCount: rows.length,
+        );
+      } catch (_) {}
+    }
+    return TokenUsageTracker.instance.getMonthlyStats();
+  }
+
+  /// 查询本月来源分类：优先 Supabase，否则本地
+  Future<Map<String, SourceStats>> _fetchSourceBreakdown() async {
+    final userId = SupabaseService.auth.currentUser?.id;
+    if (userId != null) {
+      try {
+        final now = DateTime.now();
+        final monthStart = DateTime.utc(now.year, now.month, 1).toIso8601String();
+        final result = await SupabaseService.tokenUsageLogs
+            .select('source, prompt_tokens, completion_tokens')
+            .eq('user_id', userId)
+            .gte('created_at', monthStart);
+
+        final rows = result as List<dynamic>;
+        final map = <String, SourceStats>{};
+        for (final row in rows) {
+          final src = row['source'] as String? ?? 'unknown';
+          final stats = map.putIfAbsent(src, () => SourceStats(source: src));
+          stats.promptTokens += (row['prompt_tokens'] as int?) ?? 0;
+          stats.completionTokens += (row['completion_tokens'] as int?) ?? 0;
+          stats.callCount++;
+        }
+        return map;
+      } catch (_) {}
+    }
+    return TokenUsageTracker.instance.getSourceBreakdown();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<MonthlyStats>(
+      future: _fetchMonthlyStats(),
+      builder: (context, snapshot) {
+        final stats = snapshot.data;
+        final hasData = stats != null && stats.callCount > 0;
+
+        return ListTile(
+          leading: const Icon(Icons.data_usage),
+          title: Text(
+            '本月 Token 用量',
+            style: TextStyle(color: _getColor()),
+          ),
+          subtitle: Text(
+            hasData
+                ? '${_formatTokens(stats.totalTokens)} · ${stats.callCount}次调用'
+                : '暂无数据',
+            style: TextStyle(
+              color: _getColor().withValues(alpha: 0.7),
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: hasData
+              ? () => _showUsageDialog(context, stats)
+              : null,
+        );
+      },
+    );
+  }
+
+  void _showUsageDialog(BuildContext context, MonthlyStats stats) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('本月 Token 用量'),
+          content: FutureBuilder<Map<String, SourceStats>>(
+            future: _fetchSourceBreakdown(),
+            builder: (context, snapshot) {
+              final breakdown = snapshot.data ?? {};
+              final isOnline = SupabaseService.auth.currentUser != null;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _statRow('Prompt', _formatTokens(stats.promptTokens)),
+                  const SizedBox(height: 4),
+                  _statRow('Completion', _formatTokens(stats.completionTokens)),
+                  const SizedBox(height: 4),
+                  _statRow('总计', _formatTokens(stats.totalTokens)),
+                  const SizedBox(height: 4),
+                  _statRow('调用次数', '${stats.callCount}次'),
+                  if (isOnline)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        '数据来源：联网同步',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                      ),
+                    ),
+                  if (breakdown.isNotEmpty) ...[
+                    const Divider(height: 24),
+                    const Text('按来源分类', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    ...breakdown.entries.map((e) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: _statRow(
+                        _sourceLabel(e.key),
+                        _formatTokens(e.value.totalTokens),
+                        extra: '${e.value.callCount}次',
+                      ),
+                    )),
+                  ],
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _sourceLabel(String key) {
+    switch (key) {
+      case 'comfort':
+        return '日记安慰';
+      case 'chat':
+        return 'AI 对话';
+      case 'mail':
+        return '邮件生成';
+      case 'emotion_analysis':
+        return '情绪分析';
+      case 'intervene':
+        return '阿信介入';
+      default:
+        return key;
+    }
+  }
+
+  static String _formatTokens(int tokens) {
+    if (tokens >= 1000) {
+      return '${(tokens / 1000).toStringAsFixed(1)}k';
+    }
+    return tokens.toString();
+  }
+
+  static Widget _statRow(String label, String value, {String? extra}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey)),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (extra != null) ...[
+              const SizedBox(width: 8),
+              Text(extra, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+            ],
+          ],
+        ),
+      ],
     );
   }
 }

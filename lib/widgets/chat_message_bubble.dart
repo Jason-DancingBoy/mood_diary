@@ -9,10 +9,14 @@ class ChatMessageBubble extends StatelessWidget {
   final bool isSelectionMode;
   final bool isSelected;
   final VoidCallback onLongPress;
+  final void Function(LongPressStartDetails)? onLongPressStart;
   final VoidCallback? onTap;
   final void Function(String imageUrl)? onImageTap;
+  final VoidCallback? onVoiceTap;
+  final bool isVoicePlaying;
   final String aiName;
   final String aiEmoji;
+  final String? aiAvatarAssetPath;
   final bool showSenderHeader;
   final Color? userBubbleColor;
   final Color? otherBubbleColor;
@@ -25,10 +29,14 @@ class ChatMessageBubble extends StatelessWidget {
     required this.isSelectionMode,
     required this.isSelected,
     required this.onLongPress,
+    this.onLongPressStart,
     this.onTap,
     this.onImageTap,
+    this.onVoiceTap,
+    this.isVoicePlaying = false,
     this.aiName = '小暖',
     this.aiEmoji = '🌻',
+    this.aiAvatarAssetPath,
     this.showSenderHeader = true,
     this.userBubbleColor,
     this.otherBubbleColor,
@@ -61,6 +69,49 @@ class ChatMessageBubble extends StatelessWidget {
     );
   }
 
+  /// 语音消息气泡
+  Widget _buildVoiceBubble(Color textColor) {
+    final duration = message.audioDuration ?? 0;
+    final isMe = message.isUser;
+    return GestureDetector(
+      onTap: onVoiceTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isMe) ...[
+            Text('${duration}s', style: TextStyle(fontSize: 12, color: textColor.withValues(alpha: 0.7))),
+            const SizedBox(width: 8),
+            Icon(
+              isVoicePlaying ? Icons.pause : Icons.play_arrow,
+              color: textColor,
+              size: 22,
+            ),
+          ] else ...[
+            Icon(
+              isVoicePlaying ? Icons.pause : Icons.play_arrow,
+              color: textColor,
+              size: 22,
+            ),
+            const SizedBox(width: 8),
+            Text('${duration}s', style: TextStyle(fontSize: 12, color: textColor.withValues(alpha: 0.7))),
+          ],
+          // 简易波形条
+          ...List.generate(4, (i) {
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              width: 3,
+              height: 8.0 + (i % 3) * 4.0,
+              decoration: BoxDecoration(
+                color: textColor.withValues(alpha: isVoicePlaying ? 0.9 : 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (message.isUser) {
@@ -73,7 +124,8 @@ class ChatMessageBubble extends StatelessWidget {
   Widget _buildUserBubble(BuildContext context) {
     final maxWidth = MediaQuery.of(context).size.width * 0.75;
     return GestureDetector(
-      onLongPress: onLongPress,
+      onLongPress: onLongPressStart != null ? null : onLongPress,
+      onLongPressStart: onLongPressStart,
       onTap: onTap,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -103,9 +155,11 @@ class ChatMessageBubble extends StatelessWidget {
                 children: [
                   if (message.imageUrl != null) ...[
                     _buildImage(maxWidth),
-                    if (message.content.isNotEmpty) const SizedBox(height: 8),
+                    if (message.content.isNotEmpty || message.isVoiceMessage) const SizedBox(height: 8),
                   ],
-                  if (message.content.isNotEmpty)
+                  if (message.isVoiceMessage)
+                    _buildVoiceBubble(Colors.white)
+                  else if (message.content.isNotEmpty)
                     Text(message.content, style: const TextStyle(color: Colors.white)),
                   const SizedBox(height: 4),
                   Text(
@@ -125,10 +179,19 @@ class ChatMessageBubble extends StatelessWidget {
   }
 
   Widget _buildOtherBubble(BuildContext context) {
-    final name = message.senderName ?? aiName;
+    final name = message.isAiMessage
+        ? '魔魔胡胡胡萝卜'
+        : (message.senderName ?? aiName);
+    final emoji = message.isAiMessage
+        ? ''
+        : (message.senderEmoji ?? aiEmoji);
+    final avatarPath = message.isAiMessage
+        ? 'assets/carrot.jpg'
+        : (message.senderAvatarAssetPath ?? aiAvatarAssetPath);
     final maxWidth = MediaQuery.of(context).size.width * 0.75;
     return GestureDetector(
-      onLongPress: onLongPress,
+      onLongPress: onLongPressStart != null ? null : onLongPress,
+      onLongPressStart: onLongPressStart,
       onTap: onTap,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.start,
@@ -156,11 +219,21 @@ class ChatMessageBubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (showSenderHeader) ...[
+                  if (showSenderHeader || message.showSenderHeader || message.isAiMessage) ...[
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(aiEmoji, style: const TextStyle(fontSize: 14)),
+                        if (avatarPath != null)
+                          ClipOval(
+                            child: Image.asset(
+                              avatarPath,
+                              width: 18,
+                              height: 18,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        else
+                          Text(emoji, style: const TextStyle(fontSize: 14)),
                         const SizedBox(width: 4),
                         Text(
                           name,
@@ -176,9 +249,11 @@ class ChatMessageBubble extends StatelessWidget {
                   ],
                   if (message.imageUrl != null) ...[
                     _buildImage(maxWidth),
-                    if (message.content.isNotEmpty) const SizedBox(height: 8),
+                    if (message.content.isNotEmpty || message.isVoiceMessage) const SizedBox(height: 8),
                   ],
-                  if (message.content.isNotEmpty)
+                  if (message.isVoiceMessage)
+                    _buildVoiceBubble(theme.colorScheme.onSurface)
+                  else if (message.content.isNotEmpty)
                     Text(
                       message.content,
                       style: TextStyle(color: theme.colorScheme.onSurface),

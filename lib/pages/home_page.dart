@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/friend_chat_service.dart';
 import 'mood_list_page.dart';
 import 'profile_page.dart';
 import 'chat_list_page.dart';
@@ -26,10 +27,26 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: _selectedIndex);
+    FriendChatService.unreadFriendIds.addListener(_onUnreadChanged);
+  }
+
+  void _onUnreadChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildChatTabIcon(bool selected) {
+    final unreadCount = FriendChatService.unreadFriendIds.value.length;
+    final icon = Icon(selected ? Icons.psychology : Icons.psychology_outlined);
+    if (unreadCount == 0) return icon;
+    return Badge(
+      label: Text('$unreadCount'),
+      child: icon,
+    );
   }
 
   @override
   void dispose() {
+    FriendChatService.unreadFriendIds.removeListener(_onUnreadChanged);
     _pageController.dispose();
     super.dispose();
   }
@@ -59,23 +76,23 @@ class _HomePageState extends State<HomePage> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: _onItemTapped,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.edit_note_outlined),
             selectedIcon: Icon(Icons.edit_note),
             label: '记录',
           ),
           NavigationDestination(
-            icon: Icon(Icons.psychology_outlined),
-            selectedIcon: Icon(Icons.psychology),
+            icon: _buildChatTabIcon(false),
+            selectedIcon: _buildChatTabIcon(true),
             label: '对话',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.mail_outlined),
             selectedIcon: Icon(Icons.mail),
             label: '收件箱',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: '我的',

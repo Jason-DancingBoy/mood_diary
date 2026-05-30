@@ -1,5 +1,6 @@
 import 'dart:async';
 import './ai_service.dart';
+import 'app_trace.dart';
 
 /// AI聊天管理器 - 用于管理AI请求，确保在页面切换时请求不被取消
 class AIChatManager {
@@ -24,6 +25,8 @@ class AIChatManager {
     bool offlineMode = false,
     String? apiKey,
     String? systemPrompt,
+    bool enableSearch = false,
+    bool noEssayMode = false,
   }) async {
     // 如果有正在进行的请求，先取消它
     if (_currentRequest != null) {
@@ -38,7 +41,7 @@ class AIChatManager {
     final completer = Completer<String>();
     _currentCompleter = completer;
 
-    _currentRequest = _executeAIRequest(history, newMessage, offlineMode, apiKey: apiKey, systemPrompt: systemPrompt)
+    _currentRequest = _executeAIRequest(history, newMessage, offlineMode, apiKey: apiKey, systemPrompt: systemPrompt, enableSearch: enableSearch, noEssayMode: noEssayMode)
         .then((response) {
           completer.complete(response);
           _currentRequest = null;
@@ -65,16 +68,23 @@ class AIChatManager {
     bool offlineMode, {
     String? apiKey,
     String? systemPrompt,
+    bool enableSearch = false,
+    bool noEssayMode = false,
   }) async {
     if (offlineMode) {
       return '当前处于离线模式，无法与AI助手对话。请检查网络设置。';
     }
 
+    AppTrace.start(TraceNode.aiChatApiRequest);
     try {
-      final response = await AIService.chat(history, newMessage, apiKey: apiKey, systemPrompt: systemPrompt);
+      final response = await AIService.chat(history, newMessage, apiKey: apiKey, systemPrompt: systemPrompt, enableSearch: enableSearch, noEssayMode: noEssayMode);
+      AppTrace.end(TraceNode.aiChatApiRequest, success: true);
+      AppTrace.start(TraceNode.aiChatDisplay);
       _notifyResponse(response);
+      AppTrace.end(TraceNode.aiChatDisplay, success: true);
       return response;
     } catch (e) {
+      AppTrace.end(TraceNode.aiChatApiRequest, success: false, error: e.toString());
       if (e is Exception) {
         _notifyError(e);
       }

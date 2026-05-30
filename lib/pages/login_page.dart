@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/auth_provider.dart';
 
 class LoginPage extends StatefulWidget {
@@ -20,11 +21,43 @@ class _LoginPageState extends State<LoginPage>
   final _registerNicknameController = TextEditingController();
   bool _loginObscure = true;
   bool _registerObscure = true;
+  bool _rememberMe = false;
+
+  static const _keyEmail = 'saved_email';
+  static const _keyPassword = 'saved_password';
+  static const _keyRemember = 'remember_me';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final remember = prefs.getBool(_keyRemember) ?? false;
+    if (remember) {
+      final email = prefs.getString(_keyEmail) ?? '';
+      final password = prefs.getString(_keyPassword) ?? '';
+      _loginEmailController.text = email;
+      _loginPasswordController.text = password;
+      setState(() => _rememberMe = true);
+    }
+  }
+
+  Future<void> _saveCredentials(String email, String password) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyRemember, true);
+    await prefs.setString(_keyEmail, email);
+    await prefs.setString(_keyPassword, password);
+  }
+
+  Future<void> _clearSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyRemember);
+    await prefs.remove(_keyEmail);
+    await prefs.remove(_keyPassword);
   }
 
   @override
@@ -53,6 +86,9 @@ class _LoginPageState extends State<LoginPage>
 
     if (!mounted) return;
     if (authProvider.isLoggedIn) {
+      if (_rememberMe) {
+        await _saveCredentials(email, password);
+      }
       Navigator.of(context).pop();
     } else if (authProvider.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -193,7 +229,19 @@ class _LoginPageState extends State<LoginPage>
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            value: _rememberMe,
+            onChanged: (val) {
+              setState(() => _rememberMe = val ?? false);
+              if (!_rememberMe) _clearSavedCredentials();
+            },
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('记住密码', style: TextStyle(fontSize: 14)),
+            dense: true,
+          ),
+          const SizedBox(height: 16),
           FilledButton(
             onPressed: _handleLogin,
             style: FilledButton.styleFrom(

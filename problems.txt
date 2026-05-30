@@ -1,0 +1,17 @@
+══╡ EXCEPTION CAUGHT BY IMAGE RESOURCE SERVICE ╞════════════════════════════════════════════════════
+The following PathNotFoundException was thrown resolving an image codec:
+Cannot retrieve length of file, path = '' (OS Error: No such file or directory, errno = 2)
+
+When the exception was thrown, this was the stack:
+#0      _checkForErrorResponse (dart:io/common.dart:58:9)
+#1      _File.length.<anonymous closure> (dart:io/file_impl.dart:448:7)
+<asynchronous suspension>
+#2      FileImage._loadAsync (package:flutter/src/painting/image_provider.dart:1631:31)
+<asynchronous suspension>
+#3      MultiFrameImageStreamCompleter._handleCodecReady (package:flutter/src/painting/image_stream.dart:1021:3)
+<asynchronous suspension>
+
+Path:
+════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Another exception was thrown: A RenderFlex overflowed by 412 pixels on the right.

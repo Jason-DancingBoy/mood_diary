@@ -2,8 +2,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
+import '../services/remote_mood_service.dart';
+import '../services/app_trace.dart';
 
 class AuthProvider extends ChangeNotifier {
   User? _user;
@@ -28,6 +31,7 @@ class AuthProvider extends ChangeNotifier {
     if (_user != null) {
       _loadProfile();
       _restoreCachedAvatar();
+      RemoteMoodService.restoreMoodsIfNeeded();
     }
   }
 
@@ -84,13 +88,21 @@ class AuthProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
+    AppTrace.start(TraceNode.loginStart);
+
     try {
       await AuthService.login(email, password);
+      AppTrace.end(TraceNode.loginTokenRefresh, success: true);
       _user = AuthService.currentUser;
       await _loadProfile();
+      RemoteMoodService.restoreMoodsIfNeeded();
+      AppTrace.end(TraceNode.loginHomePage, success: true);
     } on AuthException catch (e) {
+      AppTrace.end(TraceNode.loginStart, success: false, error: e.message);
       _error = e.message;
-    } catch (e) {
+    } catch (e, st) {
+      AppTrace.end(TraceNode.loginStart, success: false, error: e.toString());
+      Sentry.captureException(e, stackTrace: st, withScope: (scope) { scope.setTag('source', 'AuthProvider.login'); });
       _error = '登录失败: $e';
     }
 
@@ -107,9 +119,11 @@ class AuthProvider extends ChangeNotifier {
       await AuthService.register(email, password, nickname);
       _user = AuthService.currentUser;
       await _loadProfile();
+      RemoteMoodService.restoreMoodsIfNeeded();
     } on AuthException catch (e) {
       _error = e.message;
-    } catch (e) {
+    } catch (e, st) {
+      Sentry.captureException(e, stackTrace: st, withScope: (scope) { scope.setTag('source', 'AuthProvider.register'); });
       _error = '注册失败: $e';
     }
 

@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/friend.dart';
 import '../models/user_profile.dart';
 import '../services/friend_service.dart';
+import '../services/supabase_service.dart';
 
 class FriendProvider extends ChangeNotifier {
   List<Friend> _friends = [];
@@ -10,6 +12,7 @@ class FriendProvider extends ChangeNotifier {
   List<UserProfile> _searchResults = [];
   bool _isLoading = false;
   String? _error;
+  RealtimeChannel? _friendsChannel;
 
   List<Friend> get friends => _friends;
   List<Friend> get pendingRequests => _pendingRequests;
@@ -122,5 +125,55 @@ class FriendProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  void startFriendListRealtime() {
+    stopFriendListRealtime();
+    final uid = SupabaseService.auth.currentUser?.id;
+    if (uid == null) return;
+
+    _friendsChannel = SupabaseService.client
+        .channel('friends_list_rt')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'friends',
+          callback: (payload) => _onFriendsChanged(payload.newRecord),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'friends',
+          callback: (payload) => _onFriendsChanged(payload.newRecord),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'friends',
+          callback: (payload) => _onFriendsChanged(payload.oldRecord),
+        )
+        .subscribe();
+  }
+
+  void _onFriendsChanged(Map<String, dynamic>? record) {
+    if (record == null) return;
+    final uid = SupabaseService.auth.currentUser?.id;
+    if (uid == null) return;
+    final requester = record['requester_id'] as String?;
+    final addressee = record['addressee_id'] as String?;
+    if (requester != uid && addressee != uid) return;
+    loadFriends();
+    loadPendingRequests();
+  }
+
+  void stopFriendListRealtime() {
+    _friendsChannel?.unsubscribe();
+    _friendsChannel = null;
+  }
+
+  @override
+  void dispose() {
+    stopFriendListRealtime();
+    super.dispose();
   }
 }

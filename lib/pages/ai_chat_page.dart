@@ -1,11 +1,20 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:math';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/chat_message.dart';
 import '../models/ai_assistant.dart';
 import '../services/ai_chat_manager.dart';
+import '../services/ai_service.dart' hide ChatMessage;
+import '../services/knowledge_base_service.dart';
+import '../services/tts_service.dart';
+import '../services/realtime_voice_service.dart';
+import '../services/voice_service.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/chat_message_bubble.dart';
 
@@ -69,6 +78,19 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
   List<ChatMessage> _messages = [];
   bool _isLoading = false;
 
+  // 多消息分段发送中
+  bool _isStaggering = false;
+
+  // 主动搭话
+  Timer? _nudgeTimer;
+  bool _hasSentProactiveGreeting = false;
+  static const _greetingInterval = Duration(minutes: 30);
+  static const _nudgeInterval = Duration(minutes: 3);
+
+  // 语音播放相关
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  int _playingMessageIndex = -1;
+
   // 对话记录列表
   List<ConversationInfo> _conversations = [];
 
@@ -76,31 +98,49 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
   bool _isSelectionMode = false;
   final Set<int> _selectedIndexes = {};
 
+  // 保存监听器引用以便在 dispose 中正确移除
+  late final void Function(bool) _loadingListener;
+  late final void Function(String) _responseListener;
+  late final void Function(Exception) _errorListener;
+
   @override
   void initState() {
     super.initState();
     _initChatBox();
 
+    // 预加载知识库（仅魔魔胡胡胡萝卜需要，但提前加载避免首次延迟）
+    KnowledgeBaseService().load();
+
     WidgetsBinding.instance.addObserver(this);
 
-    // 监听AIChatManager的状态变化
-    _chatManager.addLoadingListener((isLoading) {
+    // 保存监听器引用，确保 dispose 时能正确移除
+    _loadingListener = (isLoading) {
       if (mounted) {
         setState(() {
           _isLoading = isLoading;
         });
       }
-    });
-
-    _chatManager.addResponseListener((response) {
+    };
+    _responseListener = (response) {
       if (mounted) {
         _handleAIResponse(response);
       }
-    });
-
-    _chatManager.addErrorListener((error) {
+    };
+    _errorListener = (error) {
       if (mounted) {
         _handleAIError(error);
+      }
+    };
+
+    _chatManager.addLoadingListener(_loadingListener);
+    _chatManager.addResponseListener(_responseListener);
+    _chatManager.addErrorListener(_errorListener);
+
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _playingMessageIndex = -1;
+        });
       }
     });
   }
@@ -113,6 +153,13 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
       Future.delayed(const Duration(milliseconds: 300), () {
         _scrollToBottom();
       });
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkProactiveGreeting();
     }
   }
 
@@ -302,6 +349,27 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
     await Share.share(buffer.toString());
   }
 
+  /// 复制选中的消息
+  Future<void> _copySelected() async {
+    if (_selectedIndexes.isEmpty) return;
+
+    final sortedIndexes = _selectedIndexes.toList()..sort();
+    final buffer = StringBuffer();
+    for (final i in sortedIndexes) {
+      final msg = _messages[i];
+      final sender = msg.isUser ? '我' : widget.assistant.name;
+      buffer.writeln('$sender：${msg.content}');
+    }
+
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    _exitSelectionMode();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已复制 ${sortedIndexes.length} 条消息')),
+      );
+    }
+  }
+
   String _formatTimeForShare(DateTime time) {
     return '${time.year}/${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
@@ -310,11 +378,15 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
     final text = _controller.text.trim();
     if (text.isEmpty || _isLoading) return;
 
+    _cancelNudgeTimer();
+
     final themeProvider = context.read<ThemeProvider>();
     if (themeProvider.offlineMode) {
       _showSnackBar('当前处于离线模式，无法发送消息');
       return;
     }
+
+    final noEssayMode = themeProvider.noEssayMode;
 
     // 添加用户消息
     setState(() {
@@ -337,6 +409,31 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
       }
     }
 
+    // 根据防小作文模式选择系统提示词
+    String systemPrompt = noEssayMode
+        ? widget.assistant.noEssaySystemPrompt
+        : widget.assistant.systemPrompt;
+    bool enableSearch = false;
+    if (widget.assistant.id == 'luobo') {
+      enableSearch = true;
+      // 注入当前日期，让 AI 能理解"昨天""今天""最近"等时间概念
+      final now = DateTime.now();
+      final dateStr = '${now.year}年${now.month}月${now.day}日';
+      systemPrompt = '$systemPrompt\n\n今天的日期是$dateStr。如果用户问到时间相关问题（如"昨天""今天""最近"），你可以使用搜索功能查找最新信息后再回答。';
+
+      // 繁/简体中文偏好
+      if (themeProvider.useTraditionalChinese) {
+        systemPrompt = '$systemPrompt\n\n请使用繁体中文（正體中文）回复。';
+      } else {
+        systemPrompt = '$systemPrompt\n\n请使用简体中文（简体中文）回复。';
+      }
+
+      final kbContext = KnowledgeBaseService().search(text);
+      if (kbContext != null) {
+        systemPrompt = '$systemPrompt\n\n---\n\n$kbContext';
+      }
+    }
+
     // 使用AIChatManager发送消息 - 即使页面切换，请求也不会被取消
     // 响应和错误将由监听器处理，这样即使页面切换再返回，也能收到结果
     try {
@@ -345,7 +442,9 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
         text,
         offlineMode: themeProvider.offlineMode,
         apiKey: themeProvider.apiKey,
-        systemPrompt: widget.assistant.systemPrompt,
+        systemPrompt: systemPrompt,
+        enableSearch: enableSearch,
+        noEssayMode: noEssayMode,
       );
       // 注意：加载状态、响应和错误现在由监听器处理
     } catch (e) {
@@ -386,7 +485,111 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // ── 主动搭话 ──
+
+  void _startNudgeTimer() {
+    _cancelNudgeTimer();
+    if (!mounted) return;
+    final tp = context.read<ThemeProvider>();
+    if (!tp.proactiveChatEnabled) return;
+    _nudgeTimer = Timer(_nudgeInterval, _sendNudge);
+  }
+
+  void _cancelNudgeTimer() {
+    _nudgeTimer?.cancel();
+    _nudgeTimer = null;
+  }
+
+  void _sendNudge() {
+    if (!mounted || _isLoading || _isStaggering) return;
+    if (widget.assistant.id != 'luobo') return;
+    final tp = context.read<ThemeProvider>();
+    if (!tp.proactiveChatEnabled) return;
+
+    const nudges = [
+      '还在吗？',
+      '是不是去忙啦？',
+      '哈喽？还在不？',
+      '喂～人呢？',
+      '还在吗？有什么事随时找我～',
+    ];
+    final nudge = nudges[Random().nextInt(nudges.length)];
+    debugPrint('[萝卜·追问] $nudge');
+    _addTextMessage(nudge);
+    if (widget.assistant.id == 'luobo') {
+      _generateVoiceForResponse(nudge);
+    }
+    // 再设一个新的 nudge timer
+    _startNudgeTimer();
+  }
+
+  void _checkProactiveGreeting() {
+    if (!mounted) return;
+    if (_isLoading || _isStaggering) return;
+    if (_hasSentProactiveGreeting) return;
+    if (widget.assistant.id != 'luobo') return;
+    final tp = context.read<ThemeProvider>();
+    if (!tp.proactiveChatEnabled) return;
+
+    // 检查是否已有 AI 回复
+    final aiMessages = _messages.where((m) => !m.isUser).toList();
+    if (aiMessages.isEmpty) return;
+
+    final lastAiTime = aiMessages.last.timestamp;
+    final elapsed = DateTime.now().difference(lastAiTime);
+    if (elapsed < _greetingInterval) return;
+
+    _hasSentProactiveGreeting = true;
+    debugPrint('[萝卜·主动问候] 距上次互动 ${elapsed.inMinutes} 分钟，发送问候');
+    _sendProactiveGreeting();
+  }
+
+  Future<void> _sendProactiveGreeting() async {
+    final tp = context.read<ThemeProvider>();
+    if (tp.offlineMode || tp.apiKey.isEmpty) return;
+
+    _isStaggering = true;
+    try {
+      final history = <List<String>>[];
+      // 取最近 4 条消息作为上下文
+      final recent = _messages.length > 4
+          ? _messages.sublist(_messages.length - 4)
+          : _messages;
+      for (final msg in recent) {
+        history.add(msg.isUser ? ['0', msg.content] : ['1', msg.content]);
+      }
+
+      final noEssayMode = tp.noEssayMode;
+      final systemPrompt = noEssayMode
+          ? '你是五月天阿信，在微信上和朋友聊天。朋友刚回到聊天界面。'
+              '像朋友一样自然地打个招呼，不超过20字。不要说"欢迎回来"。'
+          : '你是五月天的主唱阿信。朋友刚回到聊天界面。'
+              '像老朋友一样自然地关心一下，不超过30字。'
+              '不要说"欢迎回来"，可以根据一天中的时间段问候。'
+              '只发一条消息，不要用 [MSG] 分隔。';
+
+      final greeting = await AIService.chat(
+        history,
+        noEssayMode ? '（刚回来）' : '（朋友刚回到聊天界面，和阿信打个招呼吧）',
+        apiKey: tp.apiKey,
+        systemPrompt: systemPrompt,
+      );
+
+      if (!mounted) return;
+      _handleAIResponse(greeting);
+    } catch (e) {
+      debugPrint('[萝卜·主动问候] 失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isStaggering = false);
+      }
+    }
+  }
+
+  // ── AI 响应处理 ──
+
   void _handleAIResponse(String response) {
+    if (!mounted) return;
     // 检查是否已经添加了这条AI响应（避免重复添加）
     final isAlreadyAdded = _messages.any(
       (msg) =>
@@ -397,18 +600,303 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
           ),
     );
 
-    if (!isAlreadyAdded) {
+    if (isAlreadyAdded) return;
+
+    // 按 [MSG] 拆分为多条消息
+    final segments = response
+        .split('[MSG]')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    if (segments.isEmpty) return;
+
+    if (segments.length == 1) {
+      // 单条消息：走原有逻辑
+      _addTextMessage(segments[0]);
+      if (widget.assistant.id == 'luobo') {
+        _generateVoiceForResponse(segments[0]);
+      }
+      _startNudgeTimer();
+    } else {
+      // 多条消息：追加第一条，其余错开延时
+      debugPrint('[萝卜·分段] 收到 ${segments.length} 段消息');
+      _addSegmentedMessages(segments);
+    }
+  }
+
+  /// 添加一条 AI 文本消息（不含语音）
+  void _addTextMessage(String text) {
+    setState(() {
+      _messages.add(
+        ChatMessage(
+          isUser: false,
+          content: text,
+          timestamp: DateTime.now(),
+        ),
+      );
+    });
+    _saveCurrentConversation();
+    _scrollToBottom();
+  }
+
+  /// 分段追加消息，带自然延时
+  Future<void> _addSegmentedMessages(List<String> segments) async {
+    _isStaggering = true;
+
+    // 第一条立即追加
+    _addTextMessage(segments[0]);
+    if (widget.assistant.id == 'luobo') {
+      _generateVoiceForResponse(segments[0]);
+    }
+
+    // 后续消息错开 1.5~3 秒
+    for (int i = 1; i < segments.length; i++) {
+      final delayMs = 1500 + Random().nextInt(1500);
+      await Future.delayed(Duration(milliseconds: delayMs));
+      if (!mounted) return;
+
+      _addTextMessage(segments[i]);
+      if (widget.assistant.id == 'luobo') {
+        _generateVoiceForResponse(segments[i]);
+      }
+    }
+
+    if (mounted) {
       setState(() {
-        _messages.add(
-          ChatMessage(
-            isUser: false,
-            content: response,
-            timestamp: DateTime.now(),
-          ),
-        );
+        _isStaggering = false;
+        _isLoading = false;
       });
-      _saveCurrentConversation();
-      _scrollToBottom();
+      _startNudgeTimer();
+    }
+  }
+
+  /// 去掉括号内的表情/动作描述，避免语音读出 "(笑)" 之类的内容
+  static final RegExp _bracketExpr = RegExp(r'[（(][^）)]*[）)]');
+
+  String _cleanTextForVoice(String text) {
+    return text.replaceAll(_bracketExpr, '').trim();
+  }
+
+  Future<void> _generateVoiceForResponse(String text) async {
+    final tp = context.read<ThemeProvider>();
+    if (!tp.ttsEnabled) {
+      debugPrint('[萝卜语音] ttsEnabled=false，跳过语音生成');
+      return;
+    }
+    text = _cleanTextForVoice(text);
+    if (text.isEmpty) return;
+    if (tp.ttsVoiceId.isEmpty) {
+      debugPrint('[萝卜语音] ttsVoiceId 为空，跳过语音生成');
+      return;
+    }
+
+    // 优先使用实时语音 API（支持唱歌），降级到传统 TTS
+    if (tp.realtimeAppId.isNotEmpty && tp.realtimeAccessToken.isNotEmpty) {
+      await _generateVoiceWithRealtime(text, tp);
+    } else {
+      await _generateVoiceWithTts(text, tp);
+    }
+  }
+
+  Future<void> _generateVoiceWithRealtime(String text, ThemeProvider tp) async {
+    debugPrint('[萝卜语音·Realtime] 开始调用实时语音 API，text=${text.length}字');
+    final result = await RealtimeVoiceService.synthesize(
+      text: text,
+      speakerId: tp.ttsVoiceId,
+      appId: tp.realtimeAppId,
+      accessToken: tp.realtimeAccessToken,
+      characterManifest: _buildRealtimeCharacterManifest(),
+    );
+
+    if (!result.isSuccess || result.filePath == null) {
+      debugPrint('[萝卜语音·Realtime] 失败: ${result.error}');
+      return;
+    }
+    if (!mounted) return;
+
+    debugPrint('[萝卜语音·Realtime] 成功，ttsTypes=${result.ttsTypes}，开始上传');
+    final audioUrl = await VoiceService.uploadVoice(result.filePath!);
+    if (audioUrl == null) {
+      debugPrint('[萝卜语音·Realtime] 上传语音文件失败');
+      try { File(result.filePath!).delete(); } catch (_) {}
+      return;
+    }
+    if (!mounted) return;
+
+    final duration = TtsService.estimateDuration(result.filePath!);
+    try { File(result.filePath!).delete(); } catch (_) {}
+
+    if (!mounted) return;
+
+    debugPrint('[萝卜语音·Realtime] 语音消息生成成功，audioUrl=$audioUrl, duration=${duration}s');
+    setState(() {
+      _messages.add(
+        ChatMessage(
+          isUser: false,
+          isAiMessage: true,
+          content: '',
+          audioUrl: audioUrl,
+          audioDuration: duration,
+          timestamp: DateTime.now(),
+        ),
+      );
+    });
+    _saveCurrentConversation();
+    _scrollToBottom();
+  }
+
+  String _buildRealtimeCharacterManifest() {
+    return '你是五月天的主唱阿信（陈信宏），1975年12月6日出生，台北人。'
+        '你说话像写歌词一样有诗意，温暖而真诚，偶尔幽默自嘲。'
+        '你相信青春不是年龄而是一种状态，相信梦想值得坚持，友情值得守护。'
+        '重要：当你回复中包含歌词时，请自然地唱出来。歌曲部分要有旋律和节奏感。'
+        '普通内容用自然、温暖、真诚的语气说话，像老朋友一样。'
+        '不要用说教的口吻，只说"我觉得"、"我发现"。';
+  }
+
+  /// 根据对话上下文分析情绪，返回 (contextText, baseSpeechRate, basePitch)
+  (String, int, int) _analyzeEmotion(String aiResponse) {
+    final userMessages = _messages.where((m) => m.isUser).toList();
+    final userMsg = userMessages.isNotEmpty ? userMessages.last.content : '';
+    final combined = '$userMsg $aiResponse';
+    bool match(List<String> ks) => ks.any((k) => combined.contains(k));
+
+    // 安抚/安慰：用户表达负面情绪
+    if (match(['难过', '伤心', '哭', '痛苦', '焦虑', '担心', '压力', '累',
+        '疲惫', '失眠', '分手', '失去', '失败', '委屈', '害怕', '无助', '烦躁',
+        '郁闷', '低落', '崩溃', '难受', '绝望', '孤独', '迷茫'])) {
+      return ('用温柔、安慰的语气说话，语速稍慢', -4, -2);
+    }
+
+    // 开心/兴奋
+    if (match(['太棒了', '开心', '恭喜', '好消息', '哈哈', '庆祝', '成功', '赢了',
+        '厉害', '太好了', '快乐', '幸福', '激动', '惊喜', '优秀', '完美', '赞',
+        '牛', '绝了'])) {
+      return ('用开心、活泼的语气说话', 12, 4);
+    }
+
+    // 鼓励/打气
+    if (match(['加油', '你可以', '相信', '坚持', '努力', '勇敢', '试试', '别放弃',
+        '一定', '能行', '支持', '前进', '站起来', '不怕', '没事的'])) {
+      return ('用鼓励、充满力量的语气说话', 6, 3);
+    }
+
+    // 好奇/探讨
+    if (match(['为什么', '怎么', '你觉得', '想知道', '好奇', '了解', '聊聊',
+        '说说', '问问', '请教', '探讨', '思考'])) {
+      return ('用好奇、轻松的语气说话', 3, 1);
+    }
+
+    // 平静/沉思
+    if (match(['安静', '放松', '冥想', '平静', '慢慢', '安心', '放下', '深呼吸',
+        '休息', '晚安', '早点睡'])) {
+      return ('用平静、舒缓的语气说话，语速稍慢', -2, -1);
+    }
+
+    // 默认：温暖略带开心
+    return ('用温暖、略带开心的语气说话', 5, 2);
+  }
+
+  Future<void> _generateVoiceWithTts(String text, ThemeProvider tp) async {
+    final apiKey = tp.ttsApiKey.isNotEmpty ? tp.ttsApiKey : tp.apiKey;
+    if (apiKey.isEmpty) {
+      debugPrint('[萝卜语音] apiKey 为空，跳过语音生成');
+      return;
+    }
+
+    final ttsText = text.replaceAll(RegExp(r'\[歌词\][\s\S]*?\[/歌词\]'), '');
+    if (ttsText.trim().isEmpty) {
+      debugPrint('[萝卜语音] 全文为歌词，跳过 TTS');
+      return;
+    }
+
+    debugPrint('[萝卜语音·TTS] 开始调用 TTS API，text=${ttsText.length}字 speakerId=${tp.ttsVoiceId}');
+    debugPrint('[萝卜语音·TTS] apiKey 长度=${apiKey.length} 前8位=${apiKey.substring(0, apiKey.length > 8 ? 8 : apiKey.length)}...');
+
+    String? contextText;
+    int speechRate = 0;
+    int pitch = 0;
+    if (tp.voiceEmotionEnabled) {
+      final (ct, sr, p) = _analyzeEmotion(ttsText);
+      contextText = ct;
+      speechRate = sr + Random().nextInt(4);
+      pitch = p + Random().nextInt(3);
+      debugPrint('[萝卜语音·TTS] 情绪分析: $contextText speechRate=$speechRate pitch=$pitch');
+    } else {
+      debugPrint('[萝卜语音·TTS] 语音情绪已关闭，使用默认语气');
+    }
+
+    final audioPath = await TtsService.textToSpeech(
+      text: ttsText,
+      speakerId: tp.ttsVoiceId,
+      apiKey: apiKey,
+      contextText: contextText,
+      speechRate: speechRate,
+      pitch: pitch,
+    );
+
+    if (audioPath == null) {
+      debugPrint('[萝卜语音·TTS] API 返回 null');
+      return;
+    }
+    if (!mounted) return;
+
+    debugPrint('[萝卜语音·TTS] 成功，开始上传');
+    final audioUrl = await VoiceService.uploadVoice(audioPath);
+    if (audioUrl == null) {
+      debugPrint('[萝卜语音·TTS] 上传语音文件失败');
+      try { File(audioPath).delete(); } catch (_) {}
+      return;
+    }
+    if (!mounted) {
+      try { File(audioPath).delete(); } catch (_) {}
+      return;
+    }
+
+    final duration = TtsService.estimateDuration(audioPath);
+    try { File(audioPath).delete(); } catch (_) {}
+    if (!mounted) return;
+
+    debugPrint('[萝卜语音·TTS] 完成，duration=${duration}s');
+    setState(() {
+      _messages.add(
+        ChatMessage(
+          isUser: false,
+          isAiMessage: true,
+          content: '',
+          audioUrl: audioUrl,
+          audioDuration: duration,
+          timestamp: DateTime.now(),
+        ),
+      );
+    });
+    _saveCurrentConversation();
+    _scrollToBottom();
+  }
+
+  Future<void> _toggleVoicePlayback(int index) async {
+    final message = _messages[index];
+    if (message.audioUrl == null) return;
+
+    if (_playingMessageIndex == index) {
+      await _audioPlayer.stop();
+      setState(() {
+        _playingMessageIndex = -1;
+      });
+    } else {
+      if (_playingMessageIndex >= 0) {
+        await _audioPlayer.stop();
+      }
+      try {
+        debugPrint('[萝卜语音] 开始播放 url=${message.audioUrl}');
+        await _audioPlayer.play(UrlSource(message.audioUrl!));
+        setState(() {
+          _playingMessageIndex = index;
+        });
+      } catch (e) {
+        debugPrint('[萝卜语音] 播放失败: $e');
+      }
     }
   }
 
@@ -650,19 +1138,91 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
 
-    // 移除监听器
-    _chatManager.removeLoadingListener((_) {});
-    _chatManager.removeResponseListener((_) {});
-    _chatManager.removeErrorListener((_) {});
+    // 移除监听器（使用保存的引用）
+    _chatManager.removeLoadingListener(_loadingListener);
+    _chatManager.removeResponseListener(_responseListener);
+    _chatManager.removeErrorListener(_errorListener);
 
     // 取消当前AI请求（如果不希望用户切换页面时取消，可以注释掉这一行）
     // _chatManager.cancelCurrentRequest();
 
+    _cancelNudgeTimer();
+    _audioPlayer.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
     _chatBox.close();
     super.dispose();
+  }
+
+  Widget _buildKebabMenu(ThemeData theme) {
+    return IconButton(
+      icon: Icon(Icons.more_vert, color: theme.colorScheme.onPrimaryContainer),
+      tooltip: '更多设置',
+      onPressed: () => _showChatSettings(),
+    );
+  }
+
+  void _showChatSettings() {
+    final tp = context.read<ThemeProvider>();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return Dialog(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    title: const Text('语音消息'),
+                    subtitle: const Text('萝卜用语音回复每条消息'),
+                    value: tp.ttsEnabled,
+                    onChanged: (v) {
+                      setDialogState(() {});
+                      tp.setTtsEnabled(v);
+                    },
+                  ),
+                  if (widget.assistant.id == 'luobo') ...[
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      title: const Text('语音情绪'),
+                      subtitle: const Text('根据语境自动调整语气'),
+                      value: tp.voiceEmotionEnabled,
+                      onChanged: (v) {
+                        setDialogState(() {});
+                        tp.setVoiceEmotionEnabled(v);
+                      },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      title: const Text('主动搭话'),
+                      subtitle: const Text('长时间未回复时主动问候'),
+                      value: tp.proactiveChatEnabled,
+                      onChanged: (v) {
+                        setDialogState(() {});
+                        tp.setProactiveChatEnabled(v);
+                      },
+                    ),
+                  ],
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    title: const Text('防小作文模式'),
+                    subtitle: const Text('限制 AI 回复长度，更像微信聊天'),
+                    value: tp.noEssayMode,
+                    onChanged: (v) {
+                      setDialogState(() {});
+                      tp.setNoEssayMode(v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -696,6 +1256,11 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
                   },
                 ),
                 IconButton(
+                  icon: const Icon(Icons.copy),
+                  tooltip: '复制选中',
+                  onPressed: _selectedIndexes.isEmpty ? null : _copySelected,
+                ),
+                IconButton(
                   icon: const Icon(Icons.delete),
                   tooltip: '删除选中',
                   onPressed: _selectedIndexes.isEmpty ? null : _deleteSelected,
@@ -715,6 +1280,7 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
                     selector: (_, tp) => tp.followSystem,
                     builder: (context, followSystem, child) {
                       final assistantColor = widget.assistant.color;
+                      final hasAvatar = widget.assistant.avatarAssetPath != null;
                       return CircleAvatar(
                         radius: 16,
                         backgroundColor: followSystem
@@ -722,17 +1288,48 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
                             : theme.brightness == Brightness.dark
                             ? assistantColor.withValues(alpha: 0.7)
                             : assistantColor,
-                        child: Text(widget.assistant.emoji, style: const TextStyle(fontSize: 16)),
+                        backgroundImage: hasAvatar
+                            ? AssetImage(widget.assistant.avatarAssetPath!)
+                            : null,
+                        child: hasAvatar
+                            ? null
+                            : Text(widget.assistant.emoji, style: const TextStyle(fontSize: 16)),
                       );
                     },
                   ),
                   const SizedBox(width: 8),
-                  Text(widget.assistant.name),
+                  Flexible(
+                    child: Text(
+                      widget.assistant.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
               backgroundColor: theme.colorScheme.inversePrimary,
               foregroundColor: theme.colorScheme.onPrimaryContainer,
               actions: [
+                if (widget.assistant.id == 'luobo')
+                  Selector<ThemeProvider, bool>(
+                    selector: (_, tp) => tp.useTraditionalChinese,
+                    builder: (context, useTraditional, child) {
+                      return IconButton(
+                        icon: Text(
+                          useTraditional ? '繁' : '簡',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                        tooltip: useTraditional ? '切换为简体中文' : '切换为繁体中文',
+                        onPressed: () {
+                          context.read<ThemeProvider>().toggleTraditionalChinese();
+                        },
+                      );
+                    },
+                  ),
+                _buildKebabMenu(theme),
                 IconButton(
                   icon: const Icon(Icons.history),
                   tooltip: '对话记录',
@@ -773,10 +1370,15 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
                     onTap: _isSelectionMode
                         ? () => _toggleSelection(index)
                         : null,
+                    onVoiceTap: message.isVoiceMessage
+                        ? () => _toggleVoicePlayback(index)
+                        : null,
+                    isVoicePlaying: _playingMessageIndex == index,
                     userBubbleColor: tp.$2,
                     otherBubbleColor: tp.$3,
                     aiName: widget.assistant.name,
                     aiEmoji: widget.assistant.emoji,
+                    aiAvatarAssetPath: widget.assistant.avatarAssetPath,
                   ),
                 );
               },
@@ -785,7 +1387,7 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
           ),
 
           // 加载指示器
-          if (_isLoading)
+          if (_isLoading || _isStaggering)
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Row(

@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 
 enum MoodType {
@@ -98,6 +99,80 @@ extension MoodExtension on MoodType {
 
   Color get color => _colors[this] ?? Colors.grey;
   Color get bgColor => _bgColors[this] ?? Colors.grey.withValues(alpha: 0.15);
+
+  double toMoodMeterEnergy() {
+    switch (this) {
+      case MoodType.blissful:
+        return 0.5;
+      case MoodType.happy:
+        return 0.6;
+      case MoodType.calm:
+        return -0.5;
+      case MoodType.surprise:
+        return 0.8;
+      case MoodType.sad:
+        return -0.5;
+      case MoodType.anxious:
+        return 0.7;
+      case MoodType.guilty:
+        return -0.3;
+      case MoodType.fear:
+        return 0.5;
+      case MoodType.angry:
+        return 0.8;
+      case MoodType.disgust:
+        return 0.3;
+    }
+  }
+
+  double toMoodMeterPleasantness() {
+    switch (this) {
+      case MoodType.blissful:
+        return 0.8;
+      case MoodType.happy:
+        return 0.7;
+      case MoodType.calm:
+        return 0.6;
+      case MoodType.surprise:
+        return 0.3;
+      case MoodType.sad:
+        return -0.6;
+      case MoodType.anxious:
+        return -0.3;
+      case MoodType.guilty:
+        return -0.5;
+      case MoodType.fear:
+        return -0.8;
+      case MoodType.angry:
+        return -0.7;
+      case MoodType.disgust:
+        return -0.6;
+    }
+  }
+
+  /// 从中文情绪词查找对应的 MoodType，用于坐标选择/AI问卷返回后精确匹配
+  static MoodType? fromEmotionWord(String emotionWord) {
+    for (final mood in MoodType.values) {
+      if (mood.label == emotionWord) return mood;
+    }
+    return null;
+  }
+
+  static MoodType fromEnergyPleasantness(double energy, double pleasantness) {
+    MoodType closest = MoodType.calm;
+    double minDist = double.infinity;
+    for (final mood in MoodType.values) {
+      final dist = sqrt(
+        pow(energy - mood.toMoodMeterEnergy(), 2) +
+            pow(pleasantness - mood.toMoodMeterPleasantness(), 2),
+      );
+      if (dist < minDist) {
+        minDist = dist;
+        closest = mood;
+      }
+    }
+    return closest;
+  }
 
   /// 心情分数 (1-10分，越高越积极)
   int get score {
