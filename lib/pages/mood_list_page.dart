@@ -34,6 +34,7 @@ class _MoodListPageState extends State<MoodListPage> {
   // 批量选择相关状态
   bool _isSelectionMode = false;
   final Set<String> _selectedIds = {};
+  bool _showEarlierRecords = false;
 
   @override
   void initState() {
@@ -275,6 +276,13 @@ class _MoodListPageState extends State<MoodListPage> {
         )
         .join('、');
     return "今天心情：$summaryList (共记录 ${todayLogs.length} 条)";
+  }
+
+  bool _isToday(MoodLog log) {
+    final now = DateTime.now();
+    return log.createdAt.year == now.year &&
+        log.createdAt.month == now.month &&
+        log.createdAt.day == now.day;
   }
 
   @override
@@ -559,75 +567,78 @@ class _MoodListPageState extends State<MoodListPage> {
     );
   }
 
+  Widget _buildLogCard(MoodLog log, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 0),
+      child: Dismissible(
+        key: ValueKey(log.id),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          color: Colors.red,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          alignment: Alignment.centerRight,
+          child: const Icon(Icons.delete, color: Colors.white),
+        ),
+        confirmDismiss: (direction) async {
+          final confirmDelete = await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('确认删除'),
+              content: const Text('确认删除这条记录吗？'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: const Text('取消'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  child: const Text('删除'),
+                ),
+              ],
+            ),
+          );
+          if (confirmDelete == true) {
+            if (log.imageFileNames != null) {
+              for (final fileName in log.imageFileNames!) {
+                await ImageManager.deleteImage(fileName);
+              }
+            }
+            await _box.delete(log.id);
+            RemoteMoodService.syncLatestMoodToStatus();
+          }
+          return confirmDelete == true;
+        },
+        child: MoodLogCard(
+          key: ValueKey(log.id),
+          log: log,
+          onView: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => MoodDetailPage(log: log, box: _box),
+            ),
+          ),
+          theme: theme,
+          onTogglePrivacy: () {
+            final map = _box.get(log.id);
+            if (map != null) {
+              final current = map['isPrivate'] as bool? ?? false;
+              map['isPrivate'] = !current;
+              _box.put(log.id, map);
+              _loadLogs();
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   /// 构建正常模式的列表（滑动删除）
   Widget _buildNormalModeList(List<MoodLog> logs, ThemeData theme, bool followSystem, Color fontColor) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
           final log = logs[index];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 0),
-            child: Dismissible(
-              key: ValueKey(log.id),
-              direction: DismissDirection.endToStart,
-              background: Container(
-                color: Colors.red,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                alignment: Alignment.centerRight,
-                child: const Icon(Icons.delete, color: Colors.white),
-              ),
-              confirmDismiss: (direction) async {
-                final confirmDelete = await showDialog<bool>(
-                  context: context,
-                  builder: (c) => AlertDialog(
-                    title: const Text('确认删除'),
-                    content: const Text('确认删除这条记录吗？'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(c, false),
-                        child: const Text('取消'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () => Navigator.pop(c, true),
-                        child: const Text('删除'),
-                      ),
-                    ],
-                  ),
-                );
-
-                if (confirmDelete == true) {
-                  if (log.imageFileNames != null) {
-                    for (final fileName in log.imageFileNames!) {
-                      await ImageManager.deleteImage(fileName);
-                    }
-                  }
-                  await _box.delete(log.id);
-                  RemoteMoodService.syncLatestMoodToStatus();
-                }
-                return confirmDelete == true;
-              },
-              child: MoodLogCard(
-                key: ValueKey(log.id),
-                log: log,
-                onView: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (ctx) => MoodDetailPage(log: log, box: _box),
-                  ),
-                ),
-                theme: theme,
-                onTogglePrivacy: () {
-                  final map = _box.get(log.id);
-                  if (map != null) {
-                    final current = map['isPrivate'] as bool? ?? false;
-                    map['isPrivate'] = !current;
-                    _box.put(log.id, map);
-                    _loadLogs();
-                  }
-                },
-              ),
-            ),
-          );
+          return _buildLogCard(log, theme);
         },
         childCount: logs.length,
       ),
