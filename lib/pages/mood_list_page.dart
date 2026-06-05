@@ -465,9 +465,9 @@ class _MoodListPageState extends State<MoodListPage> {
                     )
                   else ...[
                     // 心情记录列表
-                    _isSelectionMode
-                        ? _buildSelectionModeList(logs, theme, tp.$1, tp.$2)
-                        : _buildNormalModeList(logs, theme, tp.$1, tp.$2),
+                    ...(_isSelectionMode
+                        ? [_buildSelectionModeList(logs, theme, tp.$1, tp.$2)]
+                        : _buildSplitNormalList(logs, theme, tp.$1, tp.$2)),
                     // 底部间距，防止 FAB 遮挡
                     const SliverToBoxAdapter(
                       child: SizedBox(height: 80),
@@ -643,6 +643,91 @@ class _MoodListPageState extends State<MoodListPage> {
         childCount: logs.length,
       ),
     );
+  }
+
+  /// 构建拆分视图正常模式列表（今日记录 + 可展开的更早记录）
+  List<Widget> _buildSplitNormalList(List<MoodLog> logs, ThemeData theme, bool followSystem, Color fontColor) {
+    final todayLogs = logs.where((l) => _isToday(l)).toList();
+    final earlierLogs = logs.where((l) => !_isToday(l)).toList();
+    final hasEarlier = earlierLogs.isNotEmpty;
+    final textColor = _getCorrectColor(theme, followSystem, fontColor);
+
+    final slivers = <Widget>[
+      // Today's records
+      SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) => _buildLogCard(todayLogs[index], theme),
+          childCount: todayLogs.length,
+        ),
+      ),
+    ];
+
+    if (hasEarlier && !_showEarlierRecords) {
+      // Expand button
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            child: OutlinedButton.icon(
+              onPressed: () => setState(() => _showEarlierRecords = true),
+              icon: const Icon(Icons.expand_more),
+              label: const Text('查看更早记录'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 44),
+              ),
+            ),
+          ),
+        ),
+      );
+    } else if (_showEarlierRecords) {
+      // Past records grouped by date
+      final dateGroups = <String, List<MoodLog>>{};
+      for (final log in earlierLogs) {
+        final key = '${log.createdAt.month}月${log.createdAt.day}日';
+        dateGroups.putIfAbsent(key, () => []).add(log);
+      }
+      final dateKeys = dateGroups.keys.toList();
+
+      slivers.add(
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              int acc = 0;
+              for (final dateKey in dateKeys) {
+                final group = dateGroups[dateKey]!;
+                if (index == acc) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text(
+                      dateKey,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: textColor.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  );
+                }
+                if (index < acc + 1 + group.length) {
+                  return _buildLogCard(group[index - acc - 1], theme);
+                }
+                acc += 1 + group.length;
+              }
+              return null;
+            },
+            childCount: () {
+              int count = 0;
+              for (final group in dateGroups.values) {
+                count += 1 + group.length;
+              }
+              return count;
+            }(),
+          ),
+        ),
+      );
+    }
+
+    return slivers;
   }
 
   void _showAddLogDialog(BuildContext context) async {
