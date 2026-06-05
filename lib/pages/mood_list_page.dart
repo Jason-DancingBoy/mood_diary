@@ -683,7 +683,7 @@ class _MoodListPageState extends State<MoodListPage> {
       // Past records grouped by date
       final dateGroups = <String, List<MoodLog>>{};
       for (final log in earlierLogs) {
-        final key = '${log.createdAt.month}月${log.createdAt.day}日';
+        final key = '${log.createdAt.year}年${log.createdAt.month}月${log.createdAt.day}日';
         dateGroups.putIfAbsent(key, () => []).add(log);
       }
       final dateKeys = dateGroups.keys.toList();
