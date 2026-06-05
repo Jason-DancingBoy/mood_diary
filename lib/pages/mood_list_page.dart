@@ -632,19 +632,6 @@ class _MoodListPageState extends State<MoodListPage> {
     );
   }
 
-  /// 构建正常模式的列表（滑动删除）
-  Widget _buildNormalModeList(List<MoodLog> logs, ThemeData theme, bool followSystem, Color fontColor) {
-    return SliverList(
-      delegate: SliverChildBuilderDelegate(
-        (context, index) {
-          final log = logs[index];
-          return _buildLogCard(log, theme);
-        },
-        childCount: logs.length,
-      ),
-    );
-  }
-
   /// 构建拆分视图正常模式列表（今日记录 + 可展开的更早记录）
   List<Widget> _buildSplitNormalList(List<MoodLog> logs, ThemeData theme, bool followSystem, Color fontColor) {
     final todayLogs = logs.where((l) => _isToday(l)).toList();
