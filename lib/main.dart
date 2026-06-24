@@ -1,4 +1,4 @@
-import 'dart:io' if (dart.library.html) 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -18,7 +18,6 @@ import 'services/image_manager.dart';
 import 'services/version_service.dart';
 import 'services/notification_service.dart';
 import 'services/friend_chat_service.dart';
-import 'services/background_service.dart';
 import 'services/app_trace.dart';
 import 'pages/friend_chat_by_id_page.dart';
 import 'widgets/update_dialog.dart';
@@ -36,12 +35,10 @@ Future<void> _setupInfra() async {
   await Hive.openBox(messageCacheBoxName);
   await Hive.openBox('friend_chat_meta_box');
 
-  if (!kIsWeb) {
-    final appDir = await getApplicationDocumentsDirectory();
-    final imageDir = Directory('${appDir.path}/$imageDirectoryName');
-    if (!await imageDir.exists()) {
-      await imageDir.create(recursive: true);
-    }
+  final appDir = await getApplicationDocumentsDirectory();
+  final imageDir = Directory('${appDir.path}/$imageDirectoryName');
+  if (!await imageDir.exists()) {
+    await imageDir.create(recursive: true);
   }
 
   ImageManager.warmupCache();
@@ -51,10 +48,6 @@ Future<void> _setupInfra() async {
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
-
-  if (!kIsWeb && Platform.isAndroid) {
-    await BackgroundService.start();
-  }
 }
 
 void main() async {
@@ -146,17 +139,13 @@ class _MyAppState extends State<MyApp> {
             theme: ThemeData(
               useMaterial3: true,
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.light),
-              scaffoldBackgroundColor: themeProvider.warmThemeIndex == 0
-                  ? Colors.white
-                  : ThemeProvider.warmPalettes[themeProvider.warmThemeIndex - 1].light,
+              scaffoldBackgroundColor: Colors.white,
               pageTransitionsTheme: customPageTransitionsTheme,
             ),
             darkTheme: ThemeData(
               useMaterial3: true,
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.dark),
-              scaffoldBackgroundColor: themeProvider.warmThemeIndex == 0
-                  ? const Color(0xFF121212)
-                  : ThemeProvider.warmPalettes[themeProvider.warmThemeIndex - 1].dark,
+              scaffoldBackgroundColor: const Color(0xFF121212),
               pageTransitionsTheme: customPageTransitionsTheme,
             ),
             themeMode: themeProvider.followSystem
