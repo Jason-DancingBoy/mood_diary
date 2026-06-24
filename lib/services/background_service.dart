@@ -15,7 +15,7 @@ class BackgroundService {
     try {
       await _service.configure(
         androidConfiguration: AndroidConfiguration(
-          onStart: _onStart,
+          onStart: _onBackgroundStart,
           isForegroundMode: true,
           autoStartOnBoot: false,
           notificationChannelId: 'background_service',
@@ -34,17 +34,24 @@ class BackgroundService {
       debugPrint('BackgroundService start failed: $e');
     }
   }
+}
 
-  @pragma('vm:entry-point')
-  static Future<void> _onStart(ServiceInstance service) async {
-    WidgetsFlutterBinding.ensureInitialized();
+@pragma('vm:entry-point')
+Future<void> _onBackgroundStart(ServiceInstance service) async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-    // 监听停止事件
-    service.on('stopWithTask').listen((event) {
-      service.stopSelf();
-    });
+  // 监听停止事件
+  service.on('stopWithTask').listen((event) {
+    service.stopSelf();
+  });
 
-    // 保持 Dart event loop 不退出
-    Timer.periodic(const Duration(seconds: 30), (_) {});
-  }
+  // 监听销毁事件，清理定时器
+  Timer? keepAliveTimer;
+
+  service.on('onDestroy').listen((event) {
+    keepAliveTimer?.cancel();
+  });
+
+  // 保持 Dart event loop 不退出
+  keepAliveTimer = Timer.periodic(const Duration(seconds: 30), (_) {});
 }
