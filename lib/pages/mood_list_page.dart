@@ -121,10 +121,12 @@ class _MoodListPageState extends State<MoodListPage> {
   }
 
   /// 进入批量选择模式
-  void _enterSelectionMode() {
+  /// [initialId] 用于长按某条记录进入时，顺手把它选中
+  void _enterSelectionMode({String? initialId}) {
     setState(() {
       _isSelectionMode = true;
       _selectedIds.clear();
+      if (initialId != null) _selectedIds.add(initialId);
     });
   }
 
@@ -732,14 +734,12 @@ class _MoodListPageState extends State<MoodListPage> {
             ),
           ),
         );
+        // showModalBottomSheet 之后已跨过异步间隙，先用 context 前需确认仍挂载
+        if (!mounted) return;
         if (result == 'share') {
           _shareSingleLog(log);
         } else if (result == 'multiselect') {
-          setState(() {
-            _isSelectionMode = true;
-            _selectedIds.clear();
-            _selectedIds.add(log.id);
-          });
+          _enterSelectionMode(initialId: log.id);
         } else if (result == 'delete') {
           final confirm = await showDialog<bool>(
             context: context,
