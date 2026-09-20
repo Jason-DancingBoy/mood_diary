@@ -12,6 +12,7 @@
 .svn/
 .swiftpm/
 .env
+platform_credentials.json
 # Release script (contains keys)
 release.sh
 migrate_working_dir/
@@ -47,3 +48,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# AI 工具会话产物（.claude/worktrees 内含整个仓库副本，禁止入库）
+.claude/
+.superpowers/
