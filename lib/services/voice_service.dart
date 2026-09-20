@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:async';
 import 'package:path/path.dart' as p;
 import 'package:record/record.dart';
 import 'package:storage_client/storage_client.dart';
