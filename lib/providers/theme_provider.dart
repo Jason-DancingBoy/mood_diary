@@ -5,6 +5,15 @@ import '../enums/message_frequency.dart';
 import '../enums/message_log_range.dart';
 
 class ThemeProvider with ChangeNotifier {
+  static const List<({String label, Color light, Color dark})> warmPalettes = [
+    (label: '暖贝壳', light: Color(0xFFFFF5EE), dark: Color(0xFF1E1B18)),
+    (label: '蜜桃', light: Color(0xFFFFF0E6), dark: Color(0xFF1E1A16)),
+    (label: '浅杏', light: Color(0xFFFFF8EC), dark: Color(0xFF1E1C17)),
+    (label: '奶油', light: Color(0xFFFFFDE8), dark: Color(0xFF1E1D16)),
+    (label: '淡粉', light: Color(0xFFFFF0F3), dark: Color(0xFF1E181A)),
+    (label: '麦色', light: Color(0xFFF5F0E6), dark: Color(0xFF1C1A17)),
+  ];
+
   Color _fontColor = Colors.black;
   bool _offlineMode = false;
   MessageFrequency _messageFrequency = MessageFrequency.onceDaily;
@@ -27,6 +36,7 @@ class ThemeProvider with ChangeNotifier {
   bool _noEssayMode = false;
   bool _proactiveChatEnabled = false;
   bool _voiceEmotionEnabled = true;
+  int _warmThemeIndex = 0; // 0=off, 1-6=warm palette
 
   Color get fontColor => _fontColor;
   Color? get userBubbleColor => _userBubbleColor;
@@ -49,6 +59,8 @@ class ThemeProvider with ChangeNotifier {
   bool get noEssayMode => _noEssayMode;
   bool get proactiveChatEnabled => _proactiveChatEnabled;
   bool get voiceEmotionEnabled => _voiceEmotionEnabled;
+  int get warmThemeIndex => _warmThemeIndex;
+  bool get warmBackground => _warmThemeIndex > 0;
 
   ThemeProvider() {
     _loadFontColor();
@@ -71,6 +83,7 @@ class ThemeProvider with ChangeNotifier {
     _loadNoEssayMode();
     _loadProactiveChatEnabled();
     _loadVoiceEmotionEnabled();
+    _loadWarmBackground();
   }
 
   Future<void> _loadFontColor() async {
@@ -454,6 +467,19 @@ class ThemeProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('voiceEmotionEnabled', value);
+  }
+
+  Future<void> setWarmThemeIndex(int value) async {
+    _warmThemeIndex = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('warmThemeIndex', value);
+  }
+
+  Future<void> _loadWarmBackground() async {
+    final prefs = await SharedPreferences.getInstance();
+    _warmThemeIndex = prefs.getInt('warmThemeIndex') ?? 0;
+    notifyListeners();
   }
 
 }
