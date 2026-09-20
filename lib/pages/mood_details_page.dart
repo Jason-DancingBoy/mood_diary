@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:async';
 import 'dart:ui' as ui;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -914,7 +914,7 @@ class _MoodDetailPageState extends State<MoodDetailPage> {
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(Icons.smart_toy, color: theme.colorScheme.primary),
+                      const Text('🌻', style: TextStyle(fontSize: 24)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(

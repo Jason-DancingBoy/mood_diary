@@ -1,7 +1,7 @@
 // 文件: lib/widgets/log_editor_dialog.dart
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,6 +14,7 @@ import '../providers/theme_provider.dart';
 import '../services/image_manager.dart';
 import '../services/voice_service.dart';
 import 'mood_meter_grid.dart';
+import 'mood_heart_painter.dart';
 import 'ai_emotion_questionnaire_dialog.dart';
 
 class LogEditorDialog extends StatefulWidget {
@@ -67,7 +68,7 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
   @override
   void initState() {
     super.initState();
-    _selectedMood = widget.initialLog?.mood ?? MoodType.calm;
+    _selectedMood = widget.initialLog?.mood ?? MoodType.blissful;
     _noteController = TextEditingController(
       text: widget.initialLog?.note ?? '',
     );
@@ -467,17 +468,22 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                         padding: const EdgeInsets.only(right: 12),
                         child: ChoiceChip(
                           label: Text(mood.label),
-                          avatar: Icon(
-                            mood.icon,
-                            size: 18,
-                            color: isSelected ? Colors.white : mood.color,
+                          avatar: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CustomPaint(
+                              painter: MoodHeartPainter(
+                                color: mood.color,
+                                fillLevel: 1.0,
+                              ),
+                            ),
                           ),
                           selected: isSelected,
                           selectedColor: mood.color,
                           labelStyle: TextStyle(
                             color: isSelected
                                 ? Colors.white
-                                : (isDark ? Colors.white : Colors.black87),
+                                : theme.colorScheme.onSurface,
                           ),
                           onSelected: (selected) {
                             if (selected) {
@@ -534,7 +540,7 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.smart_toy, color: theme.colorScheme.primary),
+                    const Text('🌻', style: TextStyle(fontSize: 24)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -599,9 +605,7 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                 decoration: InputDecoration(
                   hintText: '记录下让你产生这种心情的事情...',
                   hintStyle: TextStyle(color: theme.colorScheme.outline),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  border: InputBorder.none,
                   filled: true,
                   fillColor: theme.colorScheme.surfaceContainerHighest,
                   alignLabelWithHint: true,
@@ -657,30 +661,28 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                     ),
                     const SizedBox(height: 8),
                   ],
-                  // 添加更多图片按钮
-                  if (_imageFileNames.length < 9)
-                    OutlinedButton.icon(
-                      onPressed: _pickImages,
-                      icon: const Icon(Icons.add_photo_alternate),
-                      label: Text(_tempImagePaths.isEmpty ? '添加图片' : '添加更多图片 (${_imageFileNames.length}/9)'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // 语音录入区域
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('语音记录', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  if (_voiceFilePath == null && !_isRecording)
-                    OutlinedButton.icon(
-                      onPressed: _startRecording,
-                      icon: const Icon(Icons.mic),
-                      label: const Text('录制语音'),
-                    )
-                  else if (_isRecording)
+                  // 按钮行：添加图片 + 录制语音
+                  Row(
+                    children: [
+                      if (_imageFileNames.length < 9)
+                        OutlinedButton.icon(
+                          onPressed: _pickImages,
+                          icon: const Icon(Icons.add_photo_alternate),
+                          label: Text(_tempImagePaths.isEmpty ? '添加图片' : '添加更多图片 (${_imageFileNames.length}/9)'),
+                        ),
+                      const SizedBox(width: 8),
+                      if (_voiceFilePath == null && !_isRecording)
+                        OutlinedButton.icon(
+                          onPressed: _startRecording,
+                          icon: const Icon(Icons.mic),
+                          label: const Text('录制语音'),
+                        ),
+                    ],
+                  ),
+                  // 录音中 / 已录音状态
+                  if (_isRecording)
                     Container(
+                      margin: const EdgeInsets.only(top: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
                         color: Colors.red.withValues(alpha: 0.1),
@@ -703,8 +705,9 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
                         ],
                       ),
                     )
-                  else
+                  else if (_voiceFilePath != null && !_isRecording)
                     Container(
+                      margin: const EdgeInsets.only(top: 8),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: theme.colorScheme.surfaceContainerHighest,
@@ -788,3 +791,4 @@ class _LogEditorDialogState extends State<LogEditorDialog> {
     );
   }
 }
+
