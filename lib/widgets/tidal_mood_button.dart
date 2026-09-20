@@ -287,9 +287,20 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
                 borderRadius: BorderRadius.circular(borderRadius),
                 boxShadow: [
                   BoxShadow(
-                    color: bgColors.c1.withValues(alpha: 0.08),
-                    blurRadius: 4,
+                    color: bgColors.c1.withValues(alpha: 0.18),
+                    blurRadius: 28,
                     spreadRadius: 0,
+                  ),
+                  // 两层随呼吸脉动的扩散环，形成光晕
+                  BoxShadow(
+                    color: bgColors.c1.withValues(alpha: 0.05),
+                    blurRadius: 0,
+                    spreadRadius: 8 * (1 + _breatheAnim.value * 0.5),
+                  ),
+                  BoxShadow(
+                    color: bgColors.c1.withValues(alpha: 0.03),
+                    blurRadius: 0,
+                    spreadRadius: 18 * (1 + _breatheAnim.value * 0.33),
                   ),
                 ],
               ),
@@ -298,8 +309,8 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
                 child: CustomPaint(
                   painter: TidalMoodPainter(
                     waterLevel: _effectiveWaterLevel,
-                    wavePhase1: _waveController.value * 2 * math.pi * speedMultiplier,
-                    wavePhase2: _waveController.value * 2 * math.pi * speedMultiplier + math.pi / 3,
+                    wavePhase1: _waveController.value * 2 * math.pi * 1.2 * speedMultiplier,
+                    wavePhase2: _waveController.value * 2 * math.pi * 0.857 * speedMultiplier + math.pi / 3,
                     amplitudeMultiplier: amplitudeMultiplier,
                     bgColor1: bgColors.c1,
                     bgColor2: bgColors.c2,
