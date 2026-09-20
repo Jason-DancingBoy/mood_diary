@@ -65,10 +65,35 @@ extension MoodExtension on MoodType {
     }
   }
 
+  String get emoji {
+    switch (this) {
+      case MoodType.blissful:
+        return '😊';
+      case MoodType.happy:
+        return '😄';
+      case MoodType.calm:
+        return '😐';
+      case MoodType.sad:
+        return '😢';
+      case MoodType.anxious:
+        return '😰';
+      case MoodType.guilty:
+        return '😞';
+      case MoodType.angry:
+        return '😡';
+      case MoodType.fear:
+        return '😨';
+      case MoodType.surprise:
+        return '😲';
+      case MoodType.disgust:
+        return '🤢';
+    }
+  }
+
   static final Map<MoodType, Color> _colors = {
     MoodType.blissful: Colors.deepOrangeAccent,
     MoodType.happy: Colors.pink,
-    MoodType.calm: Colors.teal,
+    MoodType.calm: const Color(0xFF4DB6AC),
     MoodType.sad: Colors.blue,
     MoodType.anxious: Colors.purple,
     MoodType.guilty: Colors.brown,
@@ -81,7 +106,7 @@ extension MoodExtension on MoodType {
   static final Map<MoodType, Color> _bgColors = {
     MoodType.blissful: Colors.deepOrangeAccent.withValues(alpha: 0.15),
     MoodType.happy: Colors.pink.withValues(alpha: 0.15),
-    MoodType.calm: Colors.teal.withValues(alpha: 0.15),
+    MoodType.calm: const Color(0xFF4DB6AC).withValues(alpha: 0.15),
     MoodType.sad: Colors.blue.withValues(alpha: 0.15),
     MoodType.anxious: Colors.purple.withValues(alpha: 0.15),
     MoodType.guilty: Colors.brown.withValues(alpha: 0.15),

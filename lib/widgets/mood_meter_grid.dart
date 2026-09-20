@@ -244,26 +244,43 @@ class _MoodMeterGridState extends State<MoodMeterGrid> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: quad.color.withValues(alpha: 0.5)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: quad.color,
-              shape: BoxShape.circle,
+          Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: quad.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _selectedEmotion?.chinese ?? quad.label,
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Text(
+                'E:${_energy!.toStringAsFixed(1)} P:${_pleasantness!.toStringAsFixed(1)}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+          if (_selectedEmotion?.description != null &&
+              _selectedEmotion!.description.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                _selectedEmotion!.description,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            _selectedEmotion?.chinese ?? quad.label,
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const Spacer(),
-          Text(
-            '能量: ${_energy!.toStringAsFixed(1)}  愉悦度: ${_pleasantness!.toStringAsFixed(1)}',
-            style: theme.textTheme.bodySmall,
-          ),
         ],
       ),
     );
