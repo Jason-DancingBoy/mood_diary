@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +7,7 @@ import '../services/image_manager.dart';
 import '../enums/mood_type.dart';
 import '../enums/mood_quadrant.dart';
 import '../providers/theme_provider.dart';
+import 'mood_heart_painter.dart';
 
 /// 静态图片路径缓存，避免 FutureBuilder 重复调用
 final Map<String, String> _imagePathCache = {};
@@ -14,6 +15,7 @@ final Map<String, String> _imagePathCache = {};
 class MoodLogCard extends StatefulWidget {
   final MoodLog log;
   final VoidCallback onView;
+  final VoidCallback? onLongPress;
   final ThemeData theme;
   final VoidCallback onTogglePrivacy;
 
@@ -21,6 +23,7 @@ class MoodLogCard extends StatefulWidget {
     super.key,
     required this.log,
     required this.onView,
+    this.onLongPress,
     required this.theme,
     required this.onTogglePrivacy,
   });
@@ -84,13 +87,26 @@ class _MoodLogCardState extends State<MoodLogCard> {
       color: widget.log.mood.bgColor,
       child: InkWell(
         onTap: widget.onView,
+        onLongPress: widget.onLongPress,
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: widget.log.customColor ?? widget.log.mood.color,
+            backgroundColor: Colors.transparent,
             child: widget.log.customEmoji != null
-                ? Text(widget.log.customEmoji ?? '',
-                    style: const TextStyle(fontSize: 20))
-                : Icon(widget.log.mood.icon, color: Colors.white),
+                ? CircleAvatar(
+                    backgroundColor: widget.log.customColor ?? widget.log.mood.color,
+                    child: Text(widget.log.customEmoji ?? '',
+                        style: const TextStyle(fontSize: 20)),
+                  )
+                : SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CustomPaint(
+                      painter: MoodHeartPainter(
+                        color: widget.log.customColor ?? widget.log.mood.color,
+                        fillLevel: 1.0,
+                      ),
+                    ),
+                  ),
           ),
           title: _PrivateText(
             private: _isPrivate,

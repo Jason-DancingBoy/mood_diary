@@ -10,6 +10,8 @@ import '../services/image_upload_service.dart';
 import '../services/app_trace.dart';
 import '../widgets/log_editor_dialog.dart';
 import '../widgets/mood_log_card.dart';
+import '../widgets/tidal_mood_button.dart';
+import '../widgets/mood_heart_painter.dart';
 import '../enums/mood_type.dart';
 import '../providers/theme_provider.dart';
 import '../providers/auth_provider.dart';
@@ -75,7 +77,7 @@ class _MoodListPageState extends State<MoodListPage> {
         .toList();
   }
 
-  void _addLog(
+  Future<MoodLog> _addLog(
     MoodType mood,
     String note,
     bool aiEnabled, {
@@ -115,6 +117,7 @@ class _MoodListPageState extends State<MoodListPage> {
     AppTrace.start(TraceNode.moodCreateRemoteSync);
     await RemoteMoodService.syncLatestMoodToStatus();
     AppTrace.end(TraceNode.moodCreateRemoteSync, success: true);
+    return newLog;
   }
 
   /// 进入批量选择模式
@@ -212,6 +215,46 @@ class _MoodListPageState extends State<MoodListPage> {
     }
   }
 
+  /// 删除单条记录
+  Future<void> _deleteSingleLog(MoodLog log) async {
+    // Delete associated images
+    if (log.imageFileNames != null) {
+      for (final fileName in log.imageFileNames!) {
+        await ImageManager.deleteImage(fileName);
+      }
+    }
+    await _box.delete(log.id);
+    RemoteMoodService.syncLatestMoodToStatus();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已删除该条记录')),
+      );
+    }
+  }
+
+  /// 分享单条心情记录
+  Future<void> _shareSingleLog(MoodLog log) async {
+    final buffer = StringBuffer();
+    buffer.writeln('📔 我的心情日记');
+    buffer.writeln('═══════════════════');
+    buffer.writeln();
+
+    final moodLabel = log.displayLabel;
+    final timeStr = '${log.createdAt.year}/${log.createdAt.month}/${log.createdAt.day} ${log.createdAt.hour.toString().padLeft(2, '0')}:${log.createdAt.minute.toString().padLeft(2, '0')}';
+    buffer.writeln('⏰ $timeStr');
+    buffer.writeln('💭 $moodLabel');
+    buffer.writeln();
+    buffer.writeln(log.note);
+    buffer.writeln();
+    buffer.writeln('═══════════════════');
+    buffer.writeln('来自：心情日记 App');
+    buffer.writeln();
+    buffer.writeln('记录你的每一天，感受内心的变化~');
+
+    await Share.share(buffer.toString());
+  }
+
   /// 分享选中的心情记录
   Future<void> _shareSelected() async {
     if (_selectedIds.isEmpty) return;
@@ -278,6 +321,35 @@ class _MoodListPageState extends State<MoodListPage> {
     return "今天心情：$summaryList (共记录 ${todayLogs.length} 条)";
   }
 
+  (double?, double?) _todayEnergyPleasantness() {
+    final now = DateTime.now();
+    final todayLogs = _box.values.where((map) {
+      final createdAt = map['createdAt'] as DateTime;
+      return createdAt.year == now.year &&
+          createdAt.month == now.month &&
+          createdAt.day == now.day;
+    }).toList();
+
+    if (todayLogs.isEmpty) return (null, null);
+
+    double totalEnergy = 0;
+    double totalPleasantness = 0;
+    int count = 0;
+
+    for (final map in todayLogs) {
+      final e = (map['energy'] as num?)?.toDouble();
+      final p = (map['pleasantness'] as num?)?.toDouble();
+      if (e != null && p != null) {
+        totalEnergy += e;
+        totalPleasantness += p;
+        count++;
+      }
+    }
+
+    if (count == 0) return (null, null);
+    return (totalEnergy / count, totalPleasantness / count);
+  }
+
   bool _isToday(MoodLog log) {
     final now = DateTime.now();
     return log.createdAt.year == now.year &&
@@ -340,20 +412,6 @@ class _MoodListPageState extends State<MoodListPage> {
             foregroundColor: appBarTextColor,
             actions: [
               IconButton(
-                icon: const Icon(Icons.checklist),
-                tooltip: '批量选择',
-                onPressed: () {
-                  final logs = _currentLogs();
-                  if (logs.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('暂无记录可选择')),
-                    );
-                    return;
-                  }
-                  _enterSelectionMode();
-                },
-              ),
-              IconButton(
                 icon: const Icon(Icons.analytics_outlined),
                 tooltip: '心情分析',
                 onPressed: () {
@@ -402,37 +460,52 @@ class _MoodListPageState extends State<MoodListPage> {
               return CustomScrollView(
                 slivers: [
                   // 今日概览卡片
+                  if (logs.isNotEmpty)
                   SliverToBoxAdapter(
-                    child: Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => MoodStatisticsPage(logs: logs),
+                            ),
+                          );
+                        },
                         borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '今日概览',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: _getCorrectColor(theme, tp.$1, tp.$2),
-                            ),
+                        child: Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            todaySummary,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: _getCorrectColor(theme, tp.$1, tp.$2).withValues(
-                                alpha: 0.8,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '今日概览',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: _getCorrectColor(theme, tp.$1, tp.$2),
+                                ),
                               ),
-                            ),
+                              const SizedBox(height: 8),
+                              Text(
+                                todaySummary,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: _getCorrectColor(theme, tp.$1, tp.$2).withValues(
+                                    alpha: 0.8,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -442,36 +515,72 @@ class _MoodListPageState extends State<MoodListPage> {
                     SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.sentiment_neutral,
-                              size: 72,
-                              color: theme.colorScheme.primary.withValues(
-                                alpha: 0.4,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('📝', style: const TextStyle(fontSize: 48)),
+                              const SizedBox(height: 16),
+                              Text(
+                                '开始你的心情之旅',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: _getCorrectColor(theme, tp.$1, tp.$2),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              '暂无心情记录，快去写一条吧~',
-                              style: TextStyle(
-                                color: _getCorrectColor(theme, tp.$1, tp.$2),
+                              const SizedBox(height: 8),
+                              Text(
+                                '每天记录心情，发现情绪变化的规律，\n与好友分享你的感受',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: _getCorrectColor(theme, tp.$1, tp.$2).withValues(alpha: 0.6),
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 24),
+                              TidalMoodButton(
+                                energy: null,
+                                pleasantness: null,
+                                onPressed: () => _showAddLogDialog(context),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                '记录今日心情',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: _getCorrectColor(theme, tp.$1, tp.$2).withValues(alpha: 0.6),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     )
                   else ...[
+                    // 记录心情按钮（概览卡片下方，记录列表上方）
+                    SliverToBoxAdapter(
+                      child: Builder(builder: (context) {
+                        final (energy, pleasantness) = _todayEnergyPleasantness();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 12),
+                          child: Center(
+                            child: TidalMoodButton(
+                              energy: energy,
+                              pleasantness: pleasantness,
+                              compact: true,
+                              onPressed: () => _showAddLogDialog(context),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
                     // 心情记录列表
                     ...(_isSelectionMode
                         ? [_buildSelectionModeList(logs, theme, tp.$1, tp.$2)]
                         : _buildSplitNormalList(logs, theme, tp.$1, tp.$2)),
-                    // 底部间距，防止 FAB 遮挡
-                    const SliverToBoxAdapter(
-                      child: SizedBox(height: 80),
-                    ),
                   ],
                 ],
               );
@@ -498,15 +607,6 @@ class _MoodListPageState extends State<MoodListPage> {
               ),
             ),
           )
-        else if (!_isSelectionMode)
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: FloatingActionButton.extended(
-              onPressed: () => _showAddLogDialog(context),
-              icon: const Icon(Icons.edit_note),
-              label: const Text('记录心情'),
-            ),
-          ),
       ],
     );
     },
@@ -550,11 +650,23 @@ class _MoodListPageState extends State<MoodListPage> {
                   style: TextStyle(color: log.displayColor),
                 ),
                 trailing: CircleAvatar(
-                  backgroundColor: log.displayColor,
+                  backgroundColor: Colors.transparent,
                   radius: 16,
                   child: log.customEmoji != null
-                      ? Text(log.customEmoji!, style: const TextStyle(fontSize: 14))
-                      : Icon(log.mood.icon, size: 18, color: Colors.white),
+                      ? CircleAvatar(
+                          backgroundColor: log.displayColor,
+                          child: Text(log.customEmoji!, style: const TextStyle(fontSize: 14)),
+                        )
+                      : SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CustomPaint(
+                            painter: MoodHeartPainter(
+                              color: log.displayColor,
+                              fillLevel: 1.0,
+                            ),
+                          ),
+                        ),
                 ),
                 onTap: () => _toggleSelection(log.id),
               ),
@@ -568,67 +680,93 @@ class _MoodListPageState extends State<MoodListPage> {
   }
 
   Widget _buildLogCard(MoodLog log, ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 0),
-      child: Dismissible(
-        key: ValueKey(log.id),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          color: Colors.red,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          alignment: Alignment.centerRight,
-          child: const Icon(Icons.delete, color: Colors.white),
+    return MoodLogCard(
+      key: ValueKey(log.id),
+      log: log,
+      onView: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (ctx) => MoodDetailPage(log: log, box: _box),
         ),
-        confirmDismiss: (direction) async {
-          final confirmDelete = await showDialog<bool>(
+      ),
+      theme: theme,
+      onTogglePrivacy: () {
+        final map = _box.get(log.id);
+        if (map != null) {
+          final current = map['isPrivate'] as bool? ?? false;
+          map['isPrivate'] = !current;
+          _box.put(log.id, map);
+          _loadLogs();
+        }
+      },
+      onLongPress: () async {
+        final result = await showModalBottomSheet<String>(
+          context: context,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (ctx) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.share),
+                    title: const Text('分享给好友'),
+                    onTap: () => Navigator.pop(ctx, 'share'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.checklist),
+                    title: const Text('多选'),
+                    onTap: () => Navigator.pop(ctx, 'multiselect'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.delete, color: Colors.red),
+                    title: const Text('删除',
+                        style: TextStyle(color: Colors.red)),
+                    onTap: () => Navigator.pop(ctx, 'delete'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        if (result == 'share') {
+          _shareSingleLog(log);
+        } else if (result == 'multiselect') {
+          setState(() {
+            _isSelectionMode = true;
+            _selectedIds.clear();
+            _selectedIds.add(log.id);
+          });
+        } else if (result == 'delete') {
+          final confirm = await showDialog<bool>(
             context: context,
-            builder: (c) => AlertDialog(
+            builder: (ctx) => AlertDialog(
               title: const Text('确认删除'),
-              content: const Text('确认删除这条记录吗？'),
+              content: const Text('确定要删除这条心情记录吗？此操作无法撤销。'),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(c, false),
+                  onPressed: () => Navigator.pop(ctx, false),
                   child: const Text('取消'),
                 ),
                 ElevatedButton(
-                  onPressed: () => Navigator.pop(c, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => Navigator.pop(ctx, true),
                   child: const Text('删除'),
                 ),
               ],
             ),
           );
-          if (confirmDelete == true) {
-            if (log.imageFileNames != null) {
-              for (final fileName in log.imageFileNames!) {
-                await ImageManager.deleteImage(fileName);
-              }
-            }
-            await _box.delete(log.id);
-            RemoteMoodService.syncLatestMoodToStatus();
+          if (confirm == true) {
+            await _deleteSingleLog(log);
           }
-          return confirmDelete == true;
-        },
-        child: MoodLogCard(
-          key: ValueKey(log.id),
-          log: log,
-          onView: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => MoodDetailPage(log: log, box: _box),
-            ),
-          ),
-          theme: theme,
-          onTogglePrivacy: () {
-            final map = _box.get(log.id);
-            if (map != null) {
-              final current = map['isPrivate'] as bool? ?? false;
-              map['isPrivate'] = !current;
-              _box.put(log.id, map);
-              _loadLogs();
-            }
-          },
-        ),
-      ),
+        }
+      },
     );
   }
 
@@ -675,6 +813,23 @@ class _MoodListPageState extends State<MoodListPage> {
       }
       final dateKeys = dateGroups.keys.toList();
 
+      // Collapse button
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+            child: OutlinedButton.icon(
+              onPressed: () => setState(() => _showEarlierRecords = false),
+              icon: const Icon(Icons.expand_less),
+              label: const Text('收起更早记录'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 44),
+              ),
+            ),
+          ),
+        ),
+      );
+
       slivers.add(
         SliverList(
           delegate: SliverChildBuilderDelegate(
@@ -683,15 +838,29 @@ class _MoodListPageState extends State<MoodListPage> {
               for (final dateKey in dateKeys) {
                 final group = dateGroups[dateKey]!;
                 if (index == acc) {
+                  final primaryColor = theme.colorScheme.primary;
                   return Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text(
-                      dateKey,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: textColor.withValues(alpha: 0.6),
-                      ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: primaryColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          dateKey,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: textColor.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -720,6 +889,7 @@ class _MoodListPageState extends State<MoodListPage> {
   void _showAddLogDialog(BuildContext context) async {
     if (!context.mounted) return;
 
+    MoodLog? savedLog;
     final shareData = await showModalBottomSheet<Map<String, dynamic>?>(
       context: context,
       isScrollControlled: true,
@@ -730,18 +900,21 @@ class _MoodListPageState extends State<MoodListPage> {
         initialLog: null,
         onSave: (mood, note, aiEnabled, customEmoji, customColorValue,
             customEmojiLabel, imageFileNames, voiceFilePath, voiceDuration,
-            [energy, pleasantness, emotionWord, quadrant]) =>
-            _addLog(mood, note, aiEnabled,
-                imageFileNames: imageFileNames,
-                customEmoji: customEmoji,
-                customColorValue: customColorValue,
-                customEmojiLabel: customEmojiLabel,
-                voiceFilePath: voiceFilePath,
-                voiceDuration: voiceDuration,
-                energy: energy,
-                pleasantness: pleasantness,
-                emotionWord: emotionWord,
-                quadrant: quadrant),
+            [energy, pleasantness, emotionWord, quadrant]) {
+          _addLog(mood, note, aiEnabled,
+              imageFileNames: imageFileNames,
+              customEmoji: customEmoji,
+              customColorValue: customColorValue,
+              customEmojiLabel: customEmojiLabel,
+              voiceFilePath: voiceFilePath,
+              voiceDuration: voiceDuration,
+              energy: energy,
+              pleasantness: pleasantness,
+              emotionWord: emotionWord,
+              quadrant: quadrant).then((log) {
+            savedLog = log;
+          });
+        },
       ),
     );
 
@@ -751,43 +924,65 @@ class _MoodListPageState extends State<MoodListPage> {
     final authProvider = context.read<AuthProvider>();
     if (!authProvider.isLoggedIn || !context.mounted) return;
 
-    final moodType = shareData['mood'] as MoodType;
-    final note = shareData['note'] as String;
-    final imageFileNames = shareData['imageFileNames'] as List<String>?;
-    final voiceFilePath = shareData['voiceFilePath'] as String?;
-    final voiceDuration = shareData['voiceDuration'] as int?;
-
-    final id = DateTime.now().millisecondsSinceEpoch.toString();
-    final newLog = MoodLog(
-      id: id,
-      mood: moodType,
-      note: note,
-      imageFileNames: imageFileNames,
-      voiceFilePath: voiceFilePath,
-      voiceDuration: voiceDuration,
-      createdAt: DateTime.now(),
-      aiEnabled: shareData['aiEnabled'] as bool,
-      energy: shareData['energy'] as double?,
-      pleasantness: shareData['pleasantness'] as double?,
-      emotionWord: shareData['emotionWord'] as String?,
-      quadrant: shareData['quadrant'] as String?,
+    // 让用户选择是否分享给好友（记录已在 _addLog 中保存到本地并同步到云端）
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '记录已保存',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.save_outlined),
+                title: const Text('仅保存'),
+                subtitle: const Text('保存到本地并同步到云端'),
+                onTap: () => Navigator.of(ctx).pop('save_only'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.share_outlined),
+                title: const Text('分享给好友'),
+                subtitle: const Text('分享心情给朋友'),
+                onTap: () => Navigator.of(ctx).pop('share'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
 
-    // 检查是否有好友
-    final friendProvider = context.read<FriendProvider>();
-    await friendProvider.loadFriends();
-    if (!context.mounted) return;
+    if (!context.mounted || choice == null) return;
 
-    if (friendProvider.friends.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('还没有好友，请先去"我的"页面添加好友'),
-        ),
-      );
-      return;
+    if (choice == 'share') {
+      if (savedLog == null) return;
+
+      final friendProvider = context.read<FriendProvider>();
+      await friendProvider.loadFriends();
+      if (!context.mounted) return;
+
+      if (friendProvider.friends.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('还没有好友，请先去"我的"页面添加好友'),
+          ),
+        );
+        return;
+      }
+
+      _showShareFriendPicker(context, savedLog!);
     }
-
-    _showShareFriendPicker(context, newLog);
   }
 
   Future<void> _showShareFriendPicker(
