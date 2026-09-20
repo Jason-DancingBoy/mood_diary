@@ -45,6 +45,7 @@ class TidalMoodPainter extends CustomPainter {
   final double waterLevel;    // 0.0–1.0, driven by energy
   final double wavePhase1;    // first wave layer horizontal offset (0–2π)
   final double wavePhase2;    // second wave layer horizontal offset
+  final double amplitudeMultiplier; // press feedback: 1.0 normal, 1.5 pressed
   final Color bgColor1;       // background gradient start
   final Color bgColor2;       // background gradient end
   final Color waterColor1;    // wave layer 1 color
@@ -54,6 +55,7 @@ class TidalMoodPainter extends CustomPainter {
     required this.waterLevel,
     required this.wavePhase1,
     required this.wavePhase2,
+    this.amplitudeMultiplier = 1.0,
     required this.bgColor1,
     required this.bgColor2,
     required this.waterColor1,
@@ -131,7 +133,7 @@ class TidalMoodPainter extends CustomPainter {
 
   void _drawWave(Canvas canvas, Size size, double phase, Color color, double yOffset) {
     final baseY = size.height * (1.0 - waterLevel) + yOffset;
-    final amplitude = size.height * 0.08;
+    final amplitude = size.height * 0.08 * amplitudeMultiplier;
     final path = Path();
     path.moveTo(0, size.height);
     for (double x = 0; x <= size.width; x += 2) {
@@ -151,6 +153,7 @@ class TidalMoodPainter extends CustomPainter {
     return oldDelegate.waterLevel != waterLevel ||
         oldDelegate.wavePhase1 != wavePhase1 ||
         oldDelegate.wavePhase2 != wavePhase2 ||
+        oldDelegate.amplitudeMultiplier != amplitudeMultiplier ||
         oldDelegate.bgColor1 != bgColor1 ||
         oldDelegate.bgColor2 != bgColor2 ||
         oldDelegate.waterColor1 != waterColor1 ||
@@ -180,7 +183,9 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
     with TickerProviderStateMixin {
   late AnimationController _breatheController;
   late AnimationController _waveController;
+  late AnimationController _ebbController;
   late Animation<double> _breatheAnim;
+  bool _isPressed = false;
 
   @override
   void initState() {
@@ -195,6 +200,15 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
       duration: const Duration(milliseconds: 3000),
     )..repeat();
 
+    _ebbController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    )..addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        widget.onPressed();
+      }
+    });
+
     _breatheAnim = CurvedAnimation(
       parent: _breatheController,
       curve: Curves.easeInOut,
@@ -205,6 +219,7 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
   void dispose() {
     _breatheController.dispose();
     _waveController.dispose();
+    _ebbController.dispose();
     super.dispose();
   }
 
@@ -214,6 +229,35 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
     return ((e.clamp(-1.0, 1.0) + 1.0) / 2.0 * 0.8 + 0.1).clamp(0.1, 0.9);
   }
 
+  /// 退潮过程中水位下沉到 0.1，动画结束后再触发 onPressed。
+  double get _effectiveWaterLevel {
+    final base = _waterLevel;
+    if (_ebbController.isAnimating) {
+      return base * (1 - _ebbController.value) + 0.1 * _ebbController.value;
+    }
+    return base;
+  }
+
+  void _onTapDown(TapDownDetails details) {
+    setState(() {
+      _isPressed = true;
+      _ebbController.reset();
+    });
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    setState(() {
+      _isPressed = false;
+    });
+    _ebbController.forward(from: 0);
+  }
+
+  void _onTapCancel() {
+    setState(() {
+      _isPressed = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = widget.compact ? 100.0 : 120.0;
@@ -221,10 +265,17 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
     final bgColors = _pleasantnessColors(widget.pleasantness);
     final wColors = _waterColors(widget.pleasantness);
 
+    // 按压反馈：波速翻倍、振幅放大
+    final speedMultiplier = _isPressed ? 2.0 : 1.0;
+    final amplitudeMultiplier = _isPressed ? 1.5 : 1.0;
+
     return GestureDetector(
-      onTap: widget.onPressed,
+      behavior: HitTestBehavior.opaque,
+      onTapDown: _onTapDown,
+      onTapUp: _onTapUp,
+      onTapCancel: _onTapCancel,
       child: AnimatedBuilder(
-        animation: Listenable.merge([_breatheAnim, _waveController]),
+        animation: Listenable.merge([_breatheAnim, _waveController, _ebbController]),
         builder: (context, _) {
           final scale = 1.0 + _breatheAnim.value * 0.08;
           return Transform.scale(
@@ -246,9 +297,10 @@ class _TidalMoodButtonState extends State<TidalMoodButton>
                 borderRadius: BorderRadius.circular(borderRadius),
                 child: CustomPaint(
                   painter: TidalMoodPainter(
-                    waterLevel: _waterLevel,
-                    wavePhase1: _waveController.value * 2 * math.pi,
-                    wavePhase2: _waveController.value * 2 * math.pi + math.pi / 3,
+                    waterLevel: _effectiveWaterLevel,
+                    wavePhase1: _waveController.value * 2 * math.pi * speedMultiplier,
+                    wavePhase2: _waveController.value * 2 * math.pi * speedMultiplier + math.pi / 3,
+                    amplitudeMultiplier: amplitudeMultiplier,
                     bgColor1: bgColors.c1,
                     bgColor2: bgColors.c2,
                     waterColor1: wColors.c1,
