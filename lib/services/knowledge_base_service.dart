@@ -2,6 +2,21 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
+/// 歌词匹配结果
+class LyricMatch {
+  final String songTitle;
+  final String matchedLine;
+  final String? nextLine;
+  final bool isLastLine;
+
+  LyricMatch({
+    required this.songTitle,
+    required this.matchedLine,
+    required this.nextLine,
+    required this.isLastLine,
+  });
+}
+
 /// 知识库条目得分
 class _ScoredEntry {
   final Map<String, dynamic> entry;
@@ -9,6 +24,20 @@ class _ScoredEntry {
   final Set<String> matchedTags;
 
   _ScoredEntry(this.entry, this.score, this.matchedTags);
+}
+
+class _LyricCandidate {
+  final String songTitle;
+  final String matchedLine;
+  final String? nextLine;
+  final int score;
+
+  _LyricCandidate({
+    required this.songTitle,
+    required this.matchedLine,
+    required this.nextLine,
+    required this.score,
+  });
 }
 
 /// 本地知识库服务 — 基于关键词+主题标签的检索
@@ -47,6 +76,63 @@ class KnowledgeBaseService {
 
     debugPrint('[知识库] 命中 ${results.length} 条: ${results.map((e) => e.entry["title"] ?? e.entry["name"]).join(", ")}');
     return _formatContext(results);
+  }
+
+  /// 检测用户消息是否匹配某句歌词，返回匹配结果（含下一句）
+  /// 返回 null 表示未匹配到
+  LyricMatch? findLyricMatch(String query) {
+    if (!_loaded || _kb == null) return null;
+
+    final normalizedQuery = _normalizeForLyricMatch(query);
+    if (normalizedQuery.length < 5) return null; // 太短不匹配
+
+    final songs = _kb!['songs'] as List<dynamic>? ?? [];
+    _LyricCandidate? best;
+
+    for (final song in songs) {
+      final s = song as Map<String, dynamic>;
+      final lyrics = List<String>.from(s['lyrics'] as List? ?? []);
+      if (lyrics.isEmpty) continue;
+
+      for (int i = 0; i < lyrics.length; i++) {
+        final normalizedLine = _normalizeForLyricMatch(lyrics[i]);
+        final score = _lyricMatchScore(normalizedQuery, normalizedLine);
+        if (score > 0 && (best == null || score > best.score)) {
+          best = _LyricCandidate(
+            songTitle: s['title'] as String,
+            matchedLine: lyrics[i],
+            nextLine: i + 1 < lyrics.length ? lyrics[i + 1] : null,
+            score: score,
+          );
+        }
+      }
+    }
+
+    if (best == null || best.score < 70) return null;
+
+    return LyricMatch(
+      songTitle: best.songTitle,
+      matchedLine: best.matchedLine,
+      nextLine: best.nextLine,
+      isLastLine: best.nextLine == null,
+    );
+  }
+
+  /// 归一化文本用于歌词匹配（去标点、空格、转小写）
+  String _normalizeForLyricMatch(String text) {
+    return text
+        .replaceAll(RegExp(r'[，。！？、；：""''（）【】《》 ,.!?;:()_-]+'), '')
+        .toLowerCase();
+  }
+
+  /// 歌词匹配评分：100=完全一致, 80=包含, 0-79=字符重叠比例
+  int _lyricMatchScore(String query, String line) {
+    if (query == line) return 100;
+    if (line.contains(query) || query.contains(line)) return 80;
+    final common = query.split('').where((c) => line.contains(c)).length;
+    final ratio = common / query.length;
+    if (ratio >= 0.7) return (ratio * 70).round();
+    return 0;
   }
 
   List<_ScoredEntry> _searchAll(String query, int maxResults) {

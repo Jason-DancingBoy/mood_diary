@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:async';
 import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -431,6 +431,24 @@ class _AIChatPageState extends State<AIChatPage> with WidgetsBindingObserver {
       final kbContext = KnowledgeBaseService().search(text);
       if (kbContext != null) {
         systemPrompt = '$systemPrompt\n\n---\n\n$kbContext';
+      }
+
+      // 歌词接龙：检测用户是否发了某句歌词，引导 AI 接唱下一句
+      final lyricMatch = KnowledgeBaseService().findLyricMatch(text);
+      if (lyricMatch != null) {
+        if (lyricMatch.isLastLine) {
+          systemPrompt = '$systemPrompt\n\n'
+              '用户刚才发的是《${lyricMatch.songTitle}》的最后一句歌词'
+              '"${lyricMatch.matchedLine}"。这是歌的最后一句了，'
+              '你可以自然地互动一句（比如"换你唱"、"怎么不唱了"之类），'
+              '不要分析或解读歌词。';
+        } else {
+          systemPrompt = '$systemPrompt\n\n'
+              '用户刚才发的是《${lyricMatch.songTitle}》的一句歌词'
+              '"${lyricMatch.matchedLine}"。你要像演唱会上和歌迷互动一样，'
+              '自然地接唱下一句。下一句是："${lyricMatch.nextLine}"。'
+              '直接唱出来，不要分析、不要解释、不要感慨。';
+        }
       }
     }
 
