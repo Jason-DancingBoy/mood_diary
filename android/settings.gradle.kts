@@ -11,9 +11,11 @@ pluginManagement {
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
     repositories {
+        maven { url = uri("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/") }
         google()
         mavenCentral()
         gradlePluginPortal()
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
@@ -24,3 +26,14 @@ plugins {
 }
 
 include(":app")
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        maven { url = uri("https://jitpack.io") }
+        maven { url = uri("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/") }
+        maven { url = uri("https://mirrors.cloud.tencent.com/flutter/download.flutter.io") }
+        google()
+        mavenCentral()
+    }
+}
