@@ -202,8 +202,8 @@ class _ChatListPageState extends State<ChatListPage> {
         foregroundColor:
             theme.colorScheme.onPrimaryContainer ?? Colors.white,
         actions: [
-          Selector<ThemeProvider, (Color?, Color?, bool)>(
-            selector: (_, tp) => (tp.userBubbleColor, tp.otherBubbleColor, tp.luoBoInterventionEnabled),
+          Selector<ThemeProvider, (Color?, Color?, bool, bool)>(
+            selector: (_, tp) => (tp.userBubbleColor, tp.otherBubbleColor, tp.luoBoInterventionEnabled, tp.noEssayMode),
             builder: (context, data, child) {
               final themeProvider = context.read<ThemeProvider>();
               return PopupMenuButton<String>(
@@ -216,6 +216,8 @@ class _ChatListPageState extends State<ChatListPage> {
                       _showBubbleColorPicker(context, themeProvider, false);
                     case 'luobo_intervention':
                       themeProvider.setLuoBoInterventionEnabled(!data.$3);
+                    case 'no_essay':
+                      themeProvider.setNoEssayMode(!data.$4);
                   }
                 },
                 itemBuilder: (context) => [
@@ -231,6 +233,23 @@ class _ChatListPageState extends State<ChatListPage> {
                         value: data.$3,
                         onChanged: (v) {
                           themeProvider.setLuoBoInterventionEnabled(v);
+                          Navigator.pop(context);
+                        },
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'no_essay',
+                    child: ListTile(
+                      leading: Icon(data.$4 ? Icons.chat_bubble : Icons.chat_bubble_outline),
+                      title: const Text('防 AI 小作文'),
+                      subtitle: const Text('短句口语化回复',
+                          style: TextStyle(fontSize: 12)),
+                      trailing: Switch(
+                        value: data.$4,
+                        onChanged: (v) {
+                          themeProvider.setNoEssayMode(v);
                           Navigator.pop(context);
                         },
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,

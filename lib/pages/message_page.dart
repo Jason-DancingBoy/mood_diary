@@ -438,38 +438,74 @@ class _MessagePageState extends State<MessagePage>
     );
   }
 
-  void _showFrequencyPicker(BuildContext context, ThemeProvider themeProvider) {
+  void _showMessageSettings(BuildContext context, ThemeProvider themeProvider) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('选择小暖消息频率', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 16),
-              ...MessageFrequency.values.map((frequency) {
-                final selected = themeProvider.messageFrequency == frequency;
-                return ListTile(
-                  title: Text(frequency.label),
-                  trailing: selected
-                      ? const Icon(Icons.check, color: Colors.blue)
-                      : null,
-                  onTap: () async {
-                    await themeProvider.setMessageFrequency(frequency);
-                    MessageScheduler.updateFrequency(frequency);
-                    await MessageScheduler.triggerCheck(frequency);
-                    Navigator.of(ctx).pop();
-                  },
-                );
-              }),
-              const SizedBox(height: 8),
-            ],
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('小暖消息设置', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  '小暖会根据这些设置生成和发送消息',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                ),
+                const SizedBox(height: 16),
+                Text('消息发送频率',
+                    style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                ...MessageFrequency.values.map((frequency) {
+                  final selected = themeProvider.messageFrequency == frequency;
+                  return ListTile(
+                    title: Text(frequency.label),
+                    trailing: selected
+                        ? const Icon(Icons.check, color: Colors.blue)
+                        : null,
+                    onTap: () async {
+                      await themeProvider.setMessageFrequency(frequency);
+                      MessageScheduler.updateFrequency(frequency);
+                      await MessageScheduler.triggerCheck(frequency);
+                      Navigator.of(ctx).pop();
+                    },
+                  );
+                }),
+                const Divider(height: 24),
+                Text('消息读取记录范围',
+                    style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                Text(
+                  '小暖会根据这个范围内的记录生成消息',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                ...MessageLogRange.values.map((range) {
+                  final selected = themeProvider.messageLogRange == range;
+                  return ListTile(
+                    title: Text(range.label),
+                    trailing: selected
+                        ? const Icon(Icons.check, color: Colors.blue)
+                        : null,
+                    onTap: () {
+                      themeProvider.setMessageLogRange(range);
+                      Navigator.of(ctx).pop();
+                    },
+                  );
+                }),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         );
       },
@@ -857,8 +893,8 @@ class _MessagePageState extends State<MessagePage>
               Consumer<ThemeProvider>(
                 builder: (context, tp, _) => IconButton(
                   icon: const Icon(Icons.settings),
-                  tooltip: '设置消息频率',
-                  onPressed: () => _showFrequencyPicker(context, tp),
+                  tooltip: '小暖消息设置',
+                  onPressed: () => _showMessageSettings(context, tp),
                 ),
               ),
             ],
